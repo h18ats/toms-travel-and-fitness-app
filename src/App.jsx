@@ -6,20 +6,24 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 // ⚡ EDIT THESE PLACEHOLDERS to match Tom's actual details
 // ═══════════════════════════════════════════════════════════════
 
-// ── LOCATION CONFIG (change these!) ──────────────────────────
-const HOME_POSTCODE = "GU15 1AA";          // Tom's home postcode
-const HOME_STATION = "Ash Vale";            // Nearest station to home
-const HOME_STATION_CODE = "AHV";            // National Rail CRS code
-const SCHOOL_STATION = "Guildford";         // Nearest station to school
-const SCHOOL_STATION_CODE = "GLD";          // National Rail CRS code
-const SCHOOL_NAME = "Tom's School";         // School name
-const WX_LAT = 51.2362;                    // Weather latitude
-const WX_LON = -0.5704;                    // Weather longitude
+// ── LOCATION CONFIG ──────────────────────────────────────────
+const HOME_POSTCODE = "GU7 1LW";           // Tom's home postcode (Godalming)
+const SCHOOL_STATION = "Woking";            // Nearest station to college
+const SCHOOL_STATION_CODE = "WOK";          // National Rail CRS code
+const SCHOOL_NAME = "Woking College";       // College name
+const WX_LAT = 51.1854;                    // Weather latitude (Godalming)
+const WX_LON = -0.6127;                    // Weather longitude
+
+// ── HOME STATIONS (Tom can pick either) ─────────────────────
+const HOME_STATIONS = {
+  GOD: { name: "Godalming", code: "GOD", bikeMi: 0.5, bikeMins: 4 },
+  FNC: { name: "Farncombe", code: "FNC", bikeMi: 0.8, bikeMins: 5 },
+};
+const DEFAULT_HOME_STATION = "GOD";
 
 // ── ROUTE DISTANCES ──────────────────────────────────────────
-const BIKE_HOME_STN = { mi: 1.8, mins: 11 };   // Home → home station
-const BIKE_STN_SCHOOL = { mi: 1.2, mins: 8 };  // School station → school
-const TRAIN_MINS = 12;                           // Train journey time
+const BIKE_STN_SCHOOL = { mi: 1.0, mins: 6 };  // Woking station → Woking College
+const TRAIN_MINS = 20;                           // Train journey time (via Guildford)
 const BUF = 5;                                   // Buffer minutes
 
 // ── TERM DATES ───────────────────────────────────────────────
@@ -27,64 +31,52 @@ const TERM_START = new Date(2026, 0, 5);   // 5 Jan 2026
 const TERM_END = new Date(2026, 6, 17);    // 17 Jul 2026
 
 // ═══════════════════════════════════════════════════════════════
-// TIMETABLE — Sample school timetable for Tom
-// Edit sessions, subjects, teachers and rooms to match
+// TIMETABLE — Thomas Ritzinger-Kimbell (24007585)
+// Woking College — Tutor Group UALJPT25
+// Senior Tutor: LTH · Personal Tutor: JPT
 // ═══════════════════════════════════════════════════════════════
 const TT = {
   1: {
     label: "Monday",
     sessions: [
-      { time: "08:45-09:45", subj: "English", teacher: "Mrs Smith", room: "B12" },
-      { time: "09:45-10:45", subj: "Maths", teacher: "Mr Jones", room: "C04" },
-      { time: "11:00-12:00", subj: "Science", teacher: "Dr Patel", room: "L01" },
-      { time: "13:00-14:00", subj: "PE — Football", teacher: "Mr Williams", room: "Field", pe: true, activity: "Football", outdoor: true },
-      { time: "14:15-15:15", subj: "Geography", teacher: "Ms Taylor", room: "A08" },
+      { time: "10:05-11:05", subj: "Cert in Sport & Physical Activity", teacher: "Dale S", room: "T08", pe: true, activity: "Sport", outdoor: true },
+      { time: "12:40-13:10", subj: "Year 13 Tutor Group", teacher: "Pitt J", room: "P01" },
+      { time: "15:05-16:00", subj: "A Level German Year 2", teacher: "Pitt J", room: "W77" },
     ],
-    start: "08:45", end: "15:15",
+    start: "10:05", end: "16:00",
   },
   2: {
     label: "Tuesday",
     sessions: [
-      { time: "08:45-09:45", subj: "History", teacher: "Mr Brown", room: "A10" },
-      { time: "09:45-10:45", subj: "French", teacher: "Mme Dupont", room: "D02" },
-      { time: "11:00-12:00", subj: "Art", teacher: "Mrs Green", room: "Art 1" },
-      { time: "13:00-14:00", subj: "Computing", teacher: "Mr Shah", room: "IT1" },
-      { time: "14:15-15:15", subj: "Music", teacher: "Ms Clarke", room: "Mu1" },
+      { time: "10:05-11:30", subj: "A Level German Year 2", teacher: "Pitt J", room: "W77" },
+      { time: "11:40-12:40", subj: "BTEC Ext Cert in Business", teacher: "Brown J", room: "W51" },
+      { time: "13:40-14:55", subj: "Cert in Sport & Physical Activity", teacher: "Dale S", room: "T08", pe: true, activity: "Sport", outdoor: true },
     ],
-    start: "08:45", end: "15:15",
+    start: "10:05", end: "14:55",
   },
   3: {
     label: "Wednesday",
     sessions: [
-      { time: "08:45-09:45", subj: "Maths", teacher: "Mr Jones", room: "C04" },
-      { time: "09:45-10:45", subj: "English", teacher: "Mrs Smith", room: "B12" },
-      { time: "11:00-12:00", subj: "PE — Swimming", teacher: "Mr Williams", room: "Pool", pe: true, activity: "Swimming", outdoor: false },
-      { time: "13:00-14:00", subj: "Design Tech", teacher: "Mr Reid", room: "DT1" },
-      { time: "14:15-15:15", subj: "Science", teacher: "Dr Patel", room: "L01" },
+      { time: "08:45-10:00", subj: "BTEC Ext Cert in Business", teacher: "Brown J", room: "W51" },
     ],
-    start: "08:45", end: "15:15",
+    start: "08:45", end: "10:00",
   },
   4: {
     label: "Thursday",
     sessions: [
-      { time: "08:45-09:45", subj: "French", teacher: "Mme Dupont", room: "D02" },
-      { time: "09:45-10:45", subj: "Science", teacher: "Dr Patel", room: "L02" },
-      { time: "11:00-12:00", subj: "History", teacher: "Mr Brown", room: "A10" },
-      { time: "13:00-14:00", subj: "PE — Rugby", teacher: "Mr Williams", room: "Field", pe: true, activity: "Rugby", outdoor: true },
-      { time: "14:15-15:15", subj: "PSHE", teacher: "Mrs Adams", room: "B03" },
+      { time: "08:45-10:00", subj: "Cert in Sport & Physical Activity", teacher: "Laker C", room: "T08", pe: true, activity: "Sport", outdoor: true },
+      { time: "10:05-11:05", subj: "A Level German Year 2", teacher: "Pitt J", room: "W77" },
+      { time: "13:40-14:55", subj: "BTEC Ext Cert in Business", teacher: "Mahmood S", room: "W51" },
     ],
-    start: "08:45", end: "15:15",
+    start: "08:45", end: "14:55",
   },
   5: {
     label: "Friday",
     sessions: [
-      { time: "08:45-09:45", subj: "Maths", teacher: "Mr Jones", room: "C04" },
-      { time: "09:45-10:45", subj: "Geography", teacher: "Ms Taylor", room: "A08" },
-      { time: "11:00-12:00", subj: "English", teacher: "Mrs Smith", room: "B12" },
-      { time: "13:00-14:00", subj: "Computing", teacher: "Mr Shah", room: "IT1" },
-      { time: "14:15-15:15", subj: "PE — Athletics", teacher: "Mr Williams", room: "Track / Gym", pe: true, activity: "Athletics", outdoor: true },
+      { time: "10:05-11:05", subj: "BTEC Ext Cert in Business", teacher: "Mahmood S", room: "W51" },
+      { time: "11:40-12:40", subj: "Cert in Sport & Physical Activity", teacher: "Laker C", room: "T08", pe: true, activity: "Sport", outdoor: true },
     ],
-    start: "08:45", end: "15:15",
+    start: "10:05", end: "12:40",
   },
   6: { label: "Saturday", sessions: [], start: null, end: null },
   0: { label: "Sunday", sessions: [], start: null, end: null },
@@ -94,11 +86,11 @@ const TT = {
 // AFTER-SCHOOL ACTIVITIES (optional — toggle on/off in app)
 // ═══════════════════════════════════════════════════════════════
 const AFTER_SCHOOL = {
-  1: { name: "Football Club", time: "15:30-16:30", location: "School Field", outdoor: true, activity: "Football" },
+  1: null,
   2: null,
-  3: { name: "Swimming Squad", time: "15:30-16:30", location: "Pool", outdoor: false, activity: "Swimming" },
+  3: null,
   4: null,
-  5: { name: "Athletics Club", time: "15:30-16:30", location: "Track", outdoor: true, activity: "Athletics" },
+  5: null,
   6: null,
   0: null,
 };
@@ -317,14 +309,18 @@ const Toggle = ({ on, onToggle, label }) => (
 export default function App() {
   const [now, setNow] = useState(new Date());
   const [wx, setWx] = useState(null);
-  const [toSchool, setToSchool] = useState([]);
-  const [toHome, setToHome] = useState([]);
+  const [trainsGOD, setTrainsGOD] = useState({ to: [], from: [] });
+  const [trainsFNC, setTrainsFNC] = useState({ to: [], from: [] });
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [lastRef, setLastRef] = useState(null);
   const [selTrain, setSelTrain] = useState(null);
   const [manualDir, setManualDir] = useState(null);
   const [manualDate, setManualDate] = useState(null);
+  const [homeStation, setHomeStation] = useState(DEFAULT_HOME_STATION);
+
+  // Derived station config
+  const stn = HOME_STATIONS[homeStation];
 
   // Optional feature toggles
   const [showAfterSchool, setShowAfterSchool] = useState(true);
@@ -370,16 +366,16 @@ export default function App() {
       const actualEndMins = (showAfterSchool && as) ? hm(as.time.split("-")[1]).h * 60 + hm(as.time.split("-")[1]).m : endMins;
 
       if (nowMins < startMins + 30) {
-        return { planDate: today, dir: manualDir || "to", modeLabel: "Morning \u2014 time to head to school", modeIcon: "\uD83C\uDF05" };
+        return { planDate: today, dir: manualDir || "to", modeLabel: "Morning \u2014 time to head to college", modeIcon: "\uD83C\uDF05" };
       }
       if (nowMins < actualEndMins) {
-        return { planDate: today, dir: manualDir || "from", modeLabel: "At school \u2014 planning your trip home", modeIcon: "\uD83D\uDCDA" };
+        return { planDate: today, dir: manualDir || "from", modeLabel: "At college \u2014 planning your trip home", modeIcon: "\uD83D\uDCDA" };
       }
       const nxt = nextSchoolDay(dayClone(now, 1));
       if (nxt) {
         const daysAway = Math.round((nxt - today) / 864e5);
         const when = daysAway === 1 ? "tomorrow" : `in ${daysAway} days`;
-        return { planDate: nxt, dir: manualDir || "to", modeLabel: `Evening \u2014 next school ${when} (${DAYS[nxt.getDay()]})`, modeIcon: "\uD83C\uDF19" };
+        return { planDate: nxt, dir: manualDir || "to", modeLabel: `Evening \u2014 next college ${when} (${DAYS[nxt.getDay()]})`, modeIcon: "\uD83C\uDF19" };
       }
     }
 
@@ -388,7 +384,7 @@ export default function App() {
       const daysAway = Math.round((nxt - today) / 864e5);
       const when = daysAway === 0 ? "today" : daysAway === 1 ? "tomorrow" : `in ${daysAway} days`;
       const timeOfDay = now.getHours() >= 17 ? "Evening" : now.getHours() >= 12 ? "Afternoon" : "Morning";
-      return { planDate: nxt, dir: manualDir || "to", modeLabel: `${timeOfDay} \u2014 next school ${when} (${DAYS[nxt.getDay()]})`, modeIcon: "\uD83C\uDF19" };
+      return { planDate: nxt, dir: manualDir || "to", modeLabel: `${timeOfDay} \u2014 next college ${when} (${DAYS[nxt.getDay()]})`, modeIcon: "\uD83C\uDF19" };
     }
     return { planDate: today, dir: manualDir || "to", modeLabel: "Outside term dates", modeIcon: "\uD83C\uDFD6\uFE0F" };
   }, [now, manualDate, manualDir, showAfterSchool]);
@@ -414,14 +410,16 @@ export default function App() {
 
   const fetchTrains = useCallback(async () => {
     try {
-      const [a, b] = await Promise.all([
-        fetch(`${HUXLEY}/departures/${HOME_STATION_CODE}/to/${SCHOOL_STATION_CODE}/15`),
-        fetch(`${HUXLEY}/departures/${SCHOOL_STATION_CODE}/to/${HOME_STATION_CODE}/15`),
+      const [godTo, godFrom, fncTo, fncFrom] = await Promise.all([
+        fetch(`${HUXLEY}/departures/GOD/to/${SCHOOL_STATION_CODE}/15`),
+        fetch(`${HUXLEY}/departures/${SCHOOL_STATION_CODE}/to/GOD/15`),
+        fetch(`${HUXLEY}/departures/FNC/to/${SCHOOL_STATION_CODE}/15`),
+        fetch(`${HUXLEY}/departures/${SCHOOL_STATION_CODE}/to/FNC/15`),
       ]);
-      const [ad, bd] = await Promise.all([a.json(), b.json()]);
-      setToSchool(ad.trainServices || []);
-      setToHome(bd.trainServices || []);
-      setAlerts(ad.nrccMessages ? ad.nrccMessages.map(m => typeof m === "string" ? m : m.value || "") : []);
+      const [godToD, godFromD, fncToD, fncFromD] = await Promise.all([godTo.json(), godFrom.json(), fncTo.json(), fncFrom.json()]);
+      setTrainsGOD({ to: godToD.trainServices || [], from: godFromD.trainServices || [] });
+      setTrainsFNC({ to: fncToD.trainServices || [], from: fncFromD.trainServices || [] });
+      setAlerts(godToD.nrccMessages ? godToD.nrccMessages.map(m => typeof m === "string" ? m : m.value || "") : []);
       setLastRef(new Date());
     } catch (e) { console.error(e); }
   }, []);
@@ -432,7 +430,7 @@ export default function App() {
     return () => { clearInterval(t1); clearInterval(t2); };
   }, [fetchWx, fetchTrains]);
 
-  useEffect(() => setSelTrain(null), [planDate, dir]);
+  useEffect(() => setSelTrain(null), [planDate, dir, homeStation]);
 
   // Weather for plan date
   const daysFromNow = Math.round((planDate - dayClone(now)) / 864e5);
@@ -450,10 +448,10 @@ export default function App() {
   const pDark = (() => { const si = wx?.daily?.sunrise?.[wxIdx]; if (!si) return true; return new Date(si).getHours() >= 8; })();
 
   const bikeAdj = (pRain ? 3 : 0) + (curWind > 30 ? 5 : curWind > 20 ? 3 : 0);
-  const bHS = BIKE_HOME_STN.mins + bikeAdj;
+  const bHS = stn.bikeMins + bikeAdj;
   const bSS = BIKE_STN_SCHOOL.mins + Math.ceil(bikeAdj / 2);
   const bSS2 = BIKE_STN_SCHOOL.mins + Math.ceil(bikeAdj / 2);
-  const bSH = BIKE_HOME_STN.mins + bikeAdj;
+  const bSH = stn.bikeMins + bikeAdj;
   const clothing = clothe(pTemp, pRain, curWind, pDark);
 
   // Safety calculations
@@ -464,7 +462,8 @@ export default function App() {
   // ═══════════════════════════════════════════════════════════
   // JOURNEY CALCULATIONS
   // ═══════════════════════════════════════════════════════════
-  const trains = dir === "to" ? toSchool : toHome;
+  const activeTrains = homeStation === "GOD" ? trainsGOD : trainsFNC;
+  const trains = dir === "to" ? activeTrains.to : activeTrains.from;
   const arriveByStr = tt.start || "08:45";
   const finishStr = effectiveEnd || "15:15";
   const arriveBy = (() => { const p = hm(arriveByStr); return makeT(planDate, p.h, p.m); })();
@@ -583,8 +582,21 @@ export default function App() {
                 );
               })}
             </div>
+            {/* Station selector */}
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              {[{ v: null, l: "Auto" }, { v: "to", l: `\u2192 School` }, { v: "from", l: `\u2192 Home` }].map(o => (
+              <span style={{ fontSize: 9, fontWeight: 700, color: "#475569", letterSpacing: 1, marginRight: 2 }}>{"\uD83D\uDE89"}</span>
+              {Object.entries(HOME_STATIONS).map(([key, s]) => (
+                <button key={key} onClick={() => setHomeStation(key)} style={{
+                  padding: "5px 10px", borderRadius: 8, cursor: "pointer", fontSize: 10, fontWeight: 600,
+                  backgroundColor: homeStation === key ? "rgba(16,185,129,.2)" : "rgba(30,41,59,.5)",
+                  color: homeStation === key ? "#6ee7b7" : "#94a3b8",
+                  border: homeStation === key ? "1px solid rgba(16,185,129,.4)" : "1px solid rgba(148,163,184,.06)",
+                }}>{s.name}</button>
+              ))}
+            </div>
+            {/* Direction selector */}
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              {[{ v: null, l: "Auto" }, { v: "to", l: "\u2192 College" }, { v: "from", l: `\u2192 Home` }].map(o => (
                 <button key={o.v || "auto"} onClick={() => setManualDir(o.v)} style={{
                   padding: "5px 10px", borderRadius: 8, cursor: "pointer", fontSize: 10, fontWeight: 600,
                   backgroundColor: manualDir === o.v ? "rgba(99,102,241,.2)" : "rgba(30,41,59,.5)",
@@ -601,7 +613,7 @@ export default function App() {
           <Card style={{ marginBottom: 14, borderColor: "rgba(139,92,246,.2)" }}>
             <div style={{ textAlign: "center", padding: 10 }}>
               <div style={{ fontSize: 28, marginBottom: 6 }}>{!inTerm ? "\uD83C\uDFD6\uFE0F" : "\uD83D\uDE34"}</div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: "#a78bfa" }}>{!inTerm ? "Outside Term Dates" : `No School on ${tt.label}s`}</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#a78bfa" }}>{!inTerm ? "Outside Term Dates" : `No College on ${tt.label}s`}</div>
               <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>Train times shown below for reference</div>
             </div>
           </Card>
@@ -622,8 +634,8 @@ export default function App() {
             </div>
             <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>
               {dir === "to"
-                ? <>Leave by <strong style={{ color: "#e2e8f0" }}>{fmt(J.leave)}</strong> {"\u2192"} school starts <strong style={{ color: J.late ? "#fca5a5" : "#e2e8f0" }}>{arriveByStr}</strong></>
-                : <>Leave school {"\u2192"} home by <strong style={{ color: "#e2e8f0" }}>{fmt(J.arrHome)}</strong></>}
+                ? <>Leave by <strong style={{ color: "#e2e8f0" }}>{fmt(J.leave)}</strong> {"\u2192"} college starts <strong style={{ color: J.late ? "#fca5a5" : "#e2e8f0" }}>{arriveByStr}</strong></>
+                : <>Leave college {"\u2192"} home by <strong style={{ color: "#e2e8f0" }}>{fmt(J.arrHome)}</strong></>}
             </div>
           </div>
         )}
@@ -640,7 +652,7 @@ export default function App() {
               <>
                 <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: "#c7d2fe" }}>Leave home at {fmt(J.leave)}</div>
                 <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 6, lineHeight: 1.6 }}>
-                  {"\uD83D\uDEB2"} Bike {bHS}min to {HOME_STATION} {"\u2192"} {"\uD83D\uDE82"} {J.tStr} train {"\u2192"} {"\uD83D\uDEB2"} Bike {bSS}min to school
+                  {"\uD83D\uDEB2"} Bike {bHS}min to {stn.name} {"\u2192"} {"\uD83D\uDE82"} {J.tStr} train {"\u2192"} {"\uD83D\uDEB2"} Bike {bSS}min to school
                 </div>
                 {J.late ? <div style={{ fontSize: 13, color: "#fca5a5", marginTop: 6, fontWeight: 700 }}>{"\u26A0\uFE0F"} Arrive {fmt(J.arrSchool)} {"\u2014"} LATE for {arriveByStr} start!</div>
                   : <div style={{ fontSize: 12, color: "#6ee7b7", marginTop: 6 }}>{"\u2705"} Arrive {fmt(J.arrSchool)} {"\u2014"} {J.spare} minutes spare</div>}
@@ -659,23 +671,23 @@ export default function App() {
         {/* JOURNEY TIMELINE */}
         {hasClass && inTerm && (
           <Card style={{ marginBottom: 14, animation: "slideIn .55s" }}>
-            <Lbl icon={"\uD83D\uDCCD"}>{dir === "to" ? "Journey to School" : "Journey Home"}</Lbl>
+            <Lbl icon={"\uD83D\uDCCD"}>{dir === "to" ? "Journey to College" : "Journey Home"}</Lbl>
             <div style={{ display: "flex", alignItems: "center", gap: 0, flexWrap: "wrap", justifyContent: "center" }}>
               {(dir === "to" ? [
                 { icon: "\uD83C\uDFE0", lbl: "Home", time: fmt(J.leave), sub: HOME_POSTCODE },
-                { icon: "\uD83D\uDEB2", lbl: `${bHS}m`, sub: `${BIKE_HOME_STN.mi}mi`, tr: true },
-                { icon: "\uD83D\uDE89", lbl: HOME_STATION, time: J.tStr, sub: HOME_STATION_CODE },
+                { icon: "\uD83D\uDEB2", lbl: `${bHS}m`, sub: `${stn.bikeMi}mi`, tr: true },
+                { icon: "\uD83D\uDE89", lbl: stn.name, time: J.tStr, sub: stn.code },
                 { icon: "\uD83D\uDE82", lbl: `${TRAIN_MINS}m`, sub: "Train", tr: true },
                 { icon: "\uD83D\uDE89", lbl: SCHOOL_STATION, time: fmt(J.arrStn), sub: SCHOOL_STATION_CODE },
                 { icon: "\uD83D\uDEB2", lbl: `${bSS}m`, sub: `${BIKE_STN_SCHOOL.mi}mi`, tr: true },
-                { icon: "\uD83C\uDFEB", lbl: "School", time: fmt(J.arrSchool), sub: J.late ? "LATE!" : "\u2713", late: J.late },
+                { icon: "\uD83C\uDFEB", lbl: "College", time: fmt(J.arrSchool), sub: J.late ? "LATE!" : "\u2713", late: J.late },
               ] : [
-                { icon: "\uD83C\uDFEB", lbl: "School", time: finishStr, sub: "Finish" },
+                { icon: "\uD83C\uDFEB", lbl: "College", time: finishStr, sub: "Finish" },
                 { icon: "\uD83D\uDEB2", lbl: `${bSS2}m`, sub: `${BIKE_STN_SCHOOL.mi}mi`, tr: true },
                 { icon: "\uD83D\uDE89", lbl: SCHOOL_STATION, time: J.tStr, sub: SCHOOL_STATION_CODE },
                 { icon: "\uD83D\uDE82", lbl: `${TRAIN_MINS}m`, sub: "Train", tr: true },
-                { icon: "\uD83D\uDE89", lbl: HOME_STATION, time: fmt(J.arrStn), sub: HOME_STATION_CODE },
-                { icon: "\uD83D\uDEB2", lbl: `${bSH}m`, sub: `${BIKE_HOME_STN.mi}mi`, tr: true },
+                { icon: "\uD83D\uDE89", lbl: stn.name, time: fmt(J.arrStn), sub: stn.code },
+                { icon: "\uD83D\uDEB2", lbl: `${bSH}m`, sub: `${stn.bikeMi}mi`, tr: true },
                 { icon: "\uD83C\uDFE0", lbl: "Home", time: fmt(J.arrHome), sub: HOME_POSTCODE },
               ]).map((s, i, a) => (
                 <div key={i} style={{ display: "flex", alignItems: "center" }}>
@@ -717,7 +729,7 @@ export default function App() {
                 <div style={{ fontSize: 10, color: "#64748b" }}>{afterSchool.location}</div>
               </div>
             )}
-            {hasClass && <div style={{ marginTop: 6, fontSize: 10, color: "#64748b", textAlign: "center" }}>School: <strong style={{ color: "#e2e8f0" }}>{tt.start}</strong> {"\u2013"} <strong style={{ color: "#e2e8f0" }}>{tt.end}</strong>{showAfterSchool && afterSchool && <> + club until <strong style={{ color: "#fcd34d" }}>{afterSchool.time.split("-")[1]}</strong></>}</div>}
+            {hasClass && <div style={{ marginTop: 6, fontSize: 10, color: "#64748b", textAlign: "center" }}>College: <strong style={{ color: "#e2e8f0" }}>{tt.start}</strong> {"\u2013"} <strong style={{ color: "#e2e8f0" }}>{tt.end}</strong>{showAfterSchool && afterSchool && <> + club until <strong style={{ color: "#fcd34d" }}>{afterSchool.time.split("-")[1]}</strong></>}</div>}
           </Card>
 
           {/* WEATHER */}
@@ -850,7 +862,7 @@ export default function App() {
               const cycleToday = isToday && hasClass && inTerm;
               const cycleMins = cycleToday ? (bHS + bSS + bSS2 + bSH) : 0;
               const cycleCal = cycleMins * (EX_CAL.Cycling || 8);
-              const cycleKm = cycleToday ? ((BIKE_HOME_STN.mi + BIKE_STN_SCHOOL.mi) * 2 * 1.61).toFixed(1) : 0;
+              const cycleKm = cycleToday ? ((stn.bikeMi + BIKE_STN_SCHOOL.mi) * 2 * 1.61).toFixed(1) : 0;
 
               // PE estimate
               const peMins = peSession ? 60 : 0;
@@ -1116,7 +1128,7 @@ export default function App() {
         <Card style={{ marginTop: 14, animation: "slideIn .8s" }} glow={sts === "danger" ? "rgba(239,68,68,.12)" : undefined}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <Lbl icon={dir === "to" ? "\uD83C\uDFEB" : "\uD83C\uDFE0"}>{dir === "to" ? `Trains ${HOME_STATION_CODE} \u2192 ${SCHOOL_STATION_CODE}` : `Trains ${SCHOOL_STATION_CODE} \u2192 ${HOME_STATION_CODE}`}</Lbl>
+              <Lbl icon={dir === "to" ? "\uD83C\uDFEB" : "\uD83C\uDFE0"}>{dir === "to" ? `Trains ${stn.code} \u2192 ${SCHOOL_STATION_CODE}` : `Trains ${SCHOOL_STATION_CODE} \u2192 ${stn.code}`}</Lbl>
               <Badge s={sts}>{sts === "good" ? "Live" : sts === "warning" ? "Delays" : "Disrupted"}</Badge>
             </div>
             <div style={{ fontSize: 10, color: "#64748b" }}>{lastRef ? fmt(lastRef) : ""} {"\u00B7"} 60s</div>
@@ -1154,9 +1166,9 @@ export default function App() {
             <div style={{ marginTop: 10, padding: "10px 14px", borderRadius: 10, background: "linear-gradient(135deg,rgba(99,102,241,.1),rgba(16,185,129,.06))", border: "1px solid rgba(99,102,241,.2)" }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#818cf8" }}>
                 {dir === "to" ? (
-                  <>{"\uD83D\uDE82"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{activeTrain.std}</span> {HOME_STATION_CODE} {"\u2192"} Leave home <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{fmt(J.leave)}</span> {"\u2192"} {"\uD83D\uDEB2"}{bHS}m {"\u2192"} train {"\u2192"} {"\uD83D\uDEB2"}{bSS}m {"\u2192"} {J.late ? <span style={{ color: "#fca5a5" }}>{"\u26A0\uFE0F"} LATE {fmt(J.arrSchool)}</span> : <span style={{ color: "#6ee7b7" }}>{"\u2705"} {fmt(J.arrSchool)} ({J.spare}m spare)</span>}</>
+                  <>{"\uD83D\uDE82"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{activeTrain.std}</span> {stn.code} {"\u2192"} Leave home <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{fmt(J.leave)}</span> {"\u2192"} {"\uD83D\uDEB2"}{bHS}m {"\u2192"} train {"\u2192"} {"\uD83D\uDEB2"}{bSS}m {"\u2192"} {J.late ? <span style={{ color: "#fca5a5" }}>{"\u26A0\uFE0F"} LATE {fmt(J.arrSchool)}</span> : <span style={{ color: "#6ee7b7" }}>{"\u2705"} {fmt(J.arrSchool)} ({J.spare}m spare)</span>}</>
                 ) : (
-                  <>{"\uD83D\uDE82"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{activeTrain.std}</span> {SCHOOL_STATION_CODE} {"\u2192"} Leave school <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{fmt(J.leaveSchool)}</span> {"\u2192"} {"\uD83D\uDEB2"}{bSS2}m {"\u2192"} train {"\u2192"} {"\uD83D\uDEB2"}{bSH}m {"\u2192"} <span style={{ color: "#6ee7b7" }}>{"\uD83C\uDFE0"} {fmt(J.arrHome)}</span></>
+                  <>{"\uD83D\uDE82"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{activeTrain.std}</span> {SCHOOL_STATION_CODE} {"\u2192"} Leave college <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{fmt(J.leaveSchool)}</span> {"\u2192"} {"\uD83D\uDEB2"}{bSS2}m {"\u2192"} train {"\u2192"} {"\uD83D\uDEB2"}{bSH}m {"\u2192"} <span style={{ color: "#6ee7b7" }}>{"\uD83C\uDFE0"} {fmt(J.arrHome)}</span></>
                 )}
               </div>
             </div>
@@ -1166,9 +1178,9 @@ export default function App() {
         {/* QUICK LINKS */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginTop: 14 }}>
           {[
-            { e: "\uD83D\uDE82", l: "Trains", u: `https://www.nationalrail.co.uk/live-trains/departures/${HOME_STATION_CODE}/${SCHOOL_STATION_CODE}` },
+            { e: "\uD83D\uDE82", l: "Trains", u: `https://www.nationalrail.co.uk/live-trains/departures/${stn.code}/${SCHOOL_STATION_CODE}` },
             { e: "\u26A0\uFE0F", l: "Alerts", u: "https://www.nationalrail.co.uk/status-and-disruptions/" },
-            { e: "\uD83D\uDCDE", l: "School", u: "#" },
+            { e: "\uD83D\uDCDE", l: "College", u: "https://www.woking.ac.uk/contact/" },
             { e: "\uD83D\uDE8C", l: "Buses", u: "https://www.stagecoachbus.com/plan-a-journey" },
           ].map((l, i) => (
             <a key={i} href={l.u} target="_blank" rel="noopener noreferrer" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "10px 6px", borderRadius: 12, textDecoration: "none", backgroundColor: "rgba(15,23,42,.5)", border: "1px solid rgba(148,163,184,.06)" }}>
@@ -1187,24 +1199,20 @@ export default function App() {
               { t: "Mudguards on", s: pRain },
               { t: "Train ticket / railcard", s: true },
               { t: "Phone charged", s: true },
-              { t: "School bag packed", s: hasClass },
+              { t: "College bag packed", s: hasClass },
               { t: "Water bottle", s: pTemp > 15 || dayActivities.length > 0 },
               { t: "Hi-vis for cycling", s: pDark },
               { t: "Spare socks", s: pRain },
               { t: "PE kit", s: !!peSession },
-              { t: "Football boots / shin pads", s: peSession?.activity === "Football" || (showAfterSchool && afterSchool?.activity === "Football") },
-              { t: "Rugby boots / gumshield", s: peSession?.activity === "Rugby" },
-              { t: "Swim kit & towel", s: peSession?.activity === "Swimming" || (showAfterSchool && afterSchool?.activity === "Swimming") },
-              { t: "Running trainers", s: peSession?.activity === "Athletics" || (showAfterSchool && afterSchool?.activity === "Athletics") },
+              { t: "Sport kit & trainers", s: !!peSession },
               { t: "Sun cream", s: pTemp > 20 && dayActivities.some(a => a.outdoor) },
-              { t: "After-school kit", s: showAfterSchool && !!afterSchool },
             ].filter(x => x.s).map((x, i) => <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#cbd5e1", padding: "5px 8px", borderRadius: 8, backgroundColor: "rgba(99,102,241,.04)" }}>{"\u2610"} {x.t}</div>)}
           </div>
         </Card>
 
         {/* FOOTER */}
         <div style={{ textAlign: "center", marginTop: 16, fontSize: 10, color: "#475569" }}>
-          <div>{HOME_POSTCODE} {"\uD83D\uDEB2"} {HOME_STATION} {"\uD83D\uDE82"} {SCHOOL_STATION} {"\uD83D\uDEB2"} {SCHOOL_NAME}</div>
+          <div>{HOME_POSTCODE} {"\uD83D\uDEB2"} {stn.name} {"\uD83D\uDE82"} {SCHOOL_STATION} {"\uD83D\uDEB2"} {SCHOOL_NAME}</div>
           <div style={{ marginTop: 3 }}>National Rail Darwin {"\u00B7"} Open-Meteo {"\u00B7"} Term: {TERM_START.toLocaleDateString("en-GB", { day: "numeric", month: "short" })} {"\u2013"} {TERM_END.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</div>
           <div style={{ marginTop: 6 }}><button onClick={() => { fetchTrains(); fetchWx(); }} style={{ padding: "5px 14px", borderRadius: 8, border: "1px solid rgba(99,102,241,.3)", backgroundColor: "rgba(99,102,241,.1)", color: "#818cf8", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>{"\uD83D\uDD04"} Refresh</button></div>
         </div>
