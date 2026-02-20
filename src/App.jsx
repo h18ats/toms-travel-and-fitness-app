@@ -14,10 +14,10 @@ const SCHOOL_NAME = "Woking College";       // College name
 const WX_LAT = 51.1854;                    // Weather latitude (Godalming)
 const WX_LON = -0.6127;                    // Weather longitude
 
-// ── HOME STATIONS (Tom can pick either) ─────────────────────
+// ── HOME STATIONS (both shown in combined train list) ────────
 const HOME_STATIONS = {
-  GOD: { name: "Godalming", code: "GOD", bikeMi: 0.5, bikeMins: 4 },
-  FNC: { name: "Farncombe", code: "FNC", bikeMi: 0.8, bikeMins: 5 },
+  GOD: { name: "Godalming", code: "GOD", bikeMi: 2.5, bikeMins: 12 },
+  FNC: { name: "Farncombe", code: "FNC", bikeMi: 1.5, bikeMins: 8 },
 };
 const DEFAULT_HOME_STATION = "GOD";
 
@@ -96,13 +96,6 @@ const AFTER_SCHOOL = {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// EXERCISE CALORIE ESTIMATES (cal/min)
-// ═══════════════════════════════════════════════════════════════
-const EX_CAL = {
-  Cycling: 8, Football: 10, Rugby: 12, Swimming: 11, Athletics: 10, Walking: 5, General: 7,
-};
-
-// ═══════════════════════════════════════════════════════════════
 // MUSCLE-BUILDING MEALS & RECIPES
 // ═══════════════════════════════════════════════════════════════
 const MEALS = {
@@ -140,14 +133,6 @@ const MEALS = {
 
 // Pick a deterministic "meal of the day" based on date
 const mealOfDay = (arr, date) => arr[Math.floor((date.getFullYear() * 366 + date.getMonth() * 31 + date.getDate())) % arr.length];
-
-// ═══════════════════════════════════════════════════════════════
-// FITNESS LOG — localStorage persistence
-// ═══════════════════════════════════════════════════════════════
-const LS_KEY = "tom_fitness_log";
-const loadFitnessLog = () => { try { return JSON.parse(localStorage.getItem(LS_KEY)) || []; } catch { return []; } };
-const saveFitnessLog = (log) => { try { localStorage.setItem(LS_KEY, JSON.stringify(log)); } catch {} };
-const todayKey = (d) => d.toISOString().slice(0, 10);
 
 // ═══════════════════════════════════════════════════════════════
 // HELPERS
@@ -303,6 +288,9 @@ const Toggle = ({ on, onToggle, label }) => (
   </div>
 );
 
+// ── Train key helper ─────────────────────────────────────────
+const trainKey = (t) => `${t.stnKey}_${t.std}`;
+
 // ═══════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════
@@ -317,30 +305,12 @@ export default function App() {
   const [selTrain, setSelTrain] = useState(null);
   const [manualDir, setManualDir] = useState(null);
   const [manualDate, setManualDate] = useState(null);
-  const [homeStation, setHomeStation] = useState(DEFAULT_HOME_STATION);
-
-  // Derived station config
-  const stn = HOME_STATIONS[homeStation];
 
   // Optional feature toggles
   const [showAfterSchool, setShowAfterSchool] = useState(true);
   const [showActivitySafety, setShowActivitySafety] = useState(true);
   const [showTravelSafety, setShowTravelSafety] = useState(true);
-  const [showFitness, setShowFitness] = useState(true);
   const [showNutrition, setShowNutrition] = useState(true);
-
-  // Fitness log (localStorage-backed)
-  const [fitnessLog, setFitnessLog] = useState(loadFitnessLog);
-  const logExercise = (entry) => {
-    const updated = [...fitnessLog, { ...entry, id: Date.now(), date: todayKey(new Date()) }];
-    setFitnessLog(updated);
-    saveFitnessLog(updated);
-  };
-  const removeExercise = (id) => {
-    const updated = fitnessLog.filter(e => e.id !== id);
-    setFitnessLog(updated);
-    saveFitnessLog(updated);
-  };
 
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
 
@@ -444,7 +414,7 @@ export default function App() {
     return () => { clearInterval(t1); clearInterval(t2); };
   }, [fetchWx, fetchTrains]);
 
-  useEffect(() => setSelTrain(null), [planDate, dir, homeStation]);
+  useEffect(() => setSelTrain(null), [planDate, dir]);
 
   // Weather for plan date
   const daysFromNow = Math.round((planDate - dayClone(now)) / 864e5);
@@ -462,10 +432,7 @@ export default function App() {
   const pDark = (() => { const si = wx?.daily?.sunrise?.[wxIdx]; if (!si) return true; return new Date(si).getHours() >= 8; })();
 
   const bikeAdj = (pRain ? 3 : 0) + (curWind > 30 ? 5 : curWind > 20 ? 3 : 0);
-  const bHS = stn.bikeMins + bikeAdj;
   const bSS = BIKE_STN_SCHOOL.mins + Math.ceil(bikeAdj / 2);
-  const bSS2 = BIKE_STN_SCHOOL.mins + Math.ceil(bikeAdj / 2);
-  const bSH = stn.bikeMins + bikeAdj;
   const clothing = clothe(pTemp, pRain, curWind, pDark);
 
   // Safety calculations
@@ -474,53 +441,92 @@ export default function App() {
   const asAfterSafety = (showAfterSchool && afterSchool) ? actSafety(afterSchool.activity, afterSchool.outdoor, pTemp, pRain, curWind, pWxCode) : { tips: [], warnings: [] };
 
   // ═══════════════════════════════════════════════════════════
-  // JOURNEY CALCULATIONS
+  // JOURNEY CALCULATIONS — Combined train list from both stations
   // ═══════════════════════════════════════════════════════════
-  const activeTrains = homeStation === "GOD" ? trainsGOD : trainsFNC;
-  const trains = dir === "to" ? activeTrains.to : activeTrains.from;
+
+  // Merge trains from both home stations into one sorted list
+  const allTrains = useMemo(() => {
+    const godT = dir === "to" ? trainsGOD.to : trainsGOD.from;
+    const fncT = dir === "to" ? trainsFNC.to : trainsFNC.from;
+    const merged = [
+      ...godT.map(t => ({ ...t, stnKey: "GOD" })),
+      ...fncT.map(t => ({ ...t, stnKey: "FNC" })),
+    ].sort((a, b) => {
+      const ta = parseTT(a.std, planDate);
+      const tb = parseTT(b.std, planDate);
+      return (ta || 0) - (tb || 0);
+    });
+    return merged;
+  }, [dir, trainsGOD, trainsFNC, planDate]);
+
   const arriveByStr = tt.start || "08:45";
   const finishStr = effectiveEnd || "15:15";
   const arriveBy = (() => { const p = hm(arriveByStr); return makeT(planDate, p.h, p.m); })();
   const finishAt = (() => { const p = hm(finishStr); return makeT(planDate, p.h, p.m); })();
 
-  const idealTrainDepTo = addM(arriveBy, -(bSS + BUF + TRAIN_MINS));
-  const idealLeaveHome = addM(idealTrainDepTo, -(bHS + BUF));
-  const idealTrainDepFrom = addM(finishAt, bSS2 + BUF);
-
+  // Auto-select best train from combined list
   const autoTrain = useMemo(() => {
-    const target = dir === "to" ? idealTrainDepTo : idealTrainDepFrom;
-    return trains.find(t => {
+    if (dir === "to") {
+      let best = null;
+      for (const t of allTrains) {
+        if (t.etd === "Cancelled") continue;
+        const dep = parseTT(t.std, planDate);
+        if (!dep) continue;
+        if (isToday) {
+          const bikeToStn = HOME_STATIONS[t.stnKey].bikeMins + bikeAdj;
+          if (addM(now, bikeToStn + BUF) > dep) continue;
+        }
+        const arrDest = t.arrTime ? parseTT(t.arrTime, planDate) : addM(dep, TRAIN_MINS);
+        if (!arrDest) continue;
+        const arrCollege = addM(arrDest, bSS + BUF);
+        if (arrCollege <= arriveBy) best = t;
+      }
+      return best || allTrains.find(t => t.etd !== "Cancelled") || null;
+    }
+    // "from" direction: first catchable train after finish
+    for (const t of allTrains) {
+      if (t.etd === "Cancelled") continue;
       const dep = parseTT(t.std, planDate);
-      if (!dep || t.etd === "Cancelled") return false;
-      return dep >= addM(target, -12) && dep <= addM(target, 30);
-    });
-  }, [dir, trains, idealTrainDepTo, idealTrainDepFrom, planDate]);
+      if (!dep) continue;
+      if (dep >= addM(finishAt, bSS + BUF)) return t;
+    }
+    return allTrains.find(t => t.etd !== "Cancelled") || null;
+  }, [dir, allTrains, planDate, arriveBy, finishAt, bikeAdj, bSS, isToday, now]);
 
-  const activeTrain = selTrain ? trains.find(t => t.std === selTrain) : autoTrain;
+  const activeTrain = selTrain ? allTrains.find(t => trainKey(t) === selTrain) : autoTrain;
 
+  // Derive station from active train
+  const activeStn = activeTrain ? HOME_STATIONS[activeTrain.stnKey] : HOME_STATIONS[DEFAULT_HOME_STATION];
+  const bHS = activeStn.bikeMins + bikeAdj;
+  const bSH = activeStn.bikeMins + bikeAdj;
+
+  // Train before and after the active train
+  const activeIdx = activeTrain ? allTrains.findIndex(t => trainKey(t) === trainKey(activeTrain)) : -1;
+  const trainBefore = activeIdx > 0 ? allTrains[activeIdx - 1] : null;
+  const trainAfter = activeIdx >= 0 && activeIdx < allTrains.length - 1 ? allTrains[activeIdx + 1] : null;
+
+  // Journey calculation
   const J = useMemo(() => {
     if (dir === "to") {
-      const tDep = activeTrain ? (parseTT(activeTrain.etd === "On time" ? activeTrain.std : activeTrain.etd, planDate) || parseTT(activeTrain.std, planDate)) : idealTrainDepTo;
+      const tDep = activeTrain ? (parseTT(activeTrain.etd === "On time" ? activeTrain.std : activeTrain.etd, planDate) || parseTT(activeTrain.std, planDate)) : makeT(planDate, hm(arriveByStr).h, hm(arriveByStr).m);
       const leave = addM(tDep, -(bHS + BUF));
-      // Use actual arrival time from API if available, else fall back to TRAIN_MINS estimate
       const arrStn = (activeTrain?.arrTime ? parseTT(activeTrain.arrTime, planDate) : null) || addM(tDep, TRAIN_MINS);
       const trainMinsActual = diffM(arrStn, tDep);
       const arrSchool = addM(arrStn, bSS + BUF);
       const late = arrSchool > arriveBy;
       const spare = diffM(arriveBy, arrSchool);
-      return { leave, tDep, arrStn, arrSchool, late, spare, tStr: activeTrain?.std || fmt(idealTrainDepTo), trainMins: trainMinsActual, arrStnStr: activeTrain?.arrTime || null };
+      return { leave, tDep, arrStn, arrSchool, late, spare, tStr: activeTrain?.std || fmt(tDep), trainMins: trainMinsActual, arrStnStr: activeTrain?.arrTime || null };
     }
-    const tDep = activeTrain ? (parseTT(activeTrain.etd === "On time" ? activeTrain.std : activeTrain.etd, planDate) || parseTT(activeTrain.std, planDate)) : idealTrainDepFrom;
-    const leaveSchool = addM(tDep, -(bSS2 + BUF));
-    // Use actual arrival time from API if available, else fall back to TRAIN_MINS estimate
+    const tDep = activeTrain ? (parseTT(activeTrain.etd === "On time" ? activeTrain.std : activeTrain.etd, planDate) || parseTT(activeTrain.std, planDate)) : addM(finishAt, bSS + BUF);
+    const leaveSchool = addM(tDep, -(bSS + BUF));
     const arrStn = (activeTrain?.arrTime ? parseTT(activeTrain.arrTime, planDate) : null) || addM(tDep, TRAIN_MINS);
     const trainMinsActual = diffM(arrStn, tDep);
     const arrHome = addM(arrStn, bSH);
-    return { leaveSchool, tDep, arrStn, arrHome, tStr: activeTrain?.std || fmt(idealTrainDepFrom), trainMins: trainMinsActual, arrStnStr: activeTrain?.arrTime || null };
-  }, [dir, activeTrain, planDate, idealTrainDepTo, idealTrainDepFrom, bHS, bSS, bSS2, bSH, arriveBy]);
+    return { leaveSchool, tDep, arrStn, arrHome, tStr: activeTrain?.std || fmt(tDep), trainMins: trainMinsActual, arrStnStr: activeTrain?.arrTime || null };
+  }, [dir, activeTrain, planDate, bHS, bSS, bSH, arriveBy, finishAt, arriveByStr]);
 
   const countdown = isToday ? diffM(dir === "to" ? J.leave : J.leaveSchool, now) : null;
-  const sts = trains.some(t => t.etd === "Cancelled") ? "danger" : trains.some(t => t.etd !== "On time" && t.etd !== t.std && t.etd !== "\u2014") ? "warning" : "good";
+  const sts = allTrains.some(t => t.etd === "Cancelled") ? "danger" : allTrains.some(t => t.etd !== "On time" && t.etd !== t.std && t.etd !== "\u2014") ? "warning" : "good";
 
   const dateBtns = useMemo(() => {
     const arr = [];
@@ -531,6 +537,21 @@ export default function App() {
     }
     return arr;
   }, [now, manualDate, planDate]);
+
+  // Trainline booking URL
+  const trainlineUrl = useMemo(() => {
+    const depStn = dir === "to" ? (activeStn?.code || "GOD") : SCHOOL_STATION_CODE;
+    const arrStn = dir === "to" ? SCHOOL_STATION_CODE : (activeStn?.code || "GOD");
+    const dt = planDate.toISOString().split("T")[0] + "T" + (activeTrain?.std || "08:00") + ":00";
+    return `https://www.thetrainline.com/book/results?journeySearchType=single&origin=${depStn}&destination=${arrStn}&outwardDate=${encodeURIComponent(dt)}&outwardDateType=departAfter&passengers%5B%5D=2008-01-01%7C16-25-railcard`;
+  }, [dir, activeStn, planDate, activeTrain]);
+
+  // National Rail live departures URL
+  const liveTrainsUrl = useMemo(() => {
+    const depStn = dir === "to" ? (activeStn?.code || "GOD") : SCHOOL_STATION_CODE;
+    const arrStn = dir === "to" ? SCHOOL_STATION_CODE : (activeStn?.code || "GOD");
+    return `https://www.nationalrail.co.uk/live-trains/departures/${depStn}/to/${arrStn}`;
+  }, [dir, activeStn]);
 
   // ═══ LOADING ═══════════════════════════════════════════════
   if (loading) return (
@@ -568,7 +589,6 @@ export default function App() {
           <Toggle on={showAfterSchool} onToggle={() => setShowAfterSchool(p => !p)} label="After-school" />
           <Toggle on={showActivitySafety} onToggle={() => setShowActivitySafety(p => !p)} label="Activity safety" />
           <Toggle on={showTravelSafety} onToggle={() => setShowTravelSafety(p => !p)} label="Travel safety" />
-          <Toggle on={showFitness} onToggle={() => setShowFitness(p => !p)} label="Fitness" />
           <Toggle on={showNutrition} onToggle={() => setShowNutrition(p => !p)} label="Nutrition" />
         </div>
 
@@ -599,18 +619,6 @@ export default function App() {
                   </button>
                 );
               })}
-            </div>
-            {/* Station selector */}
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ fontSize: 9, fontWeight: 700, color: "#475569", letterSpacing: 1, marginRight: 2 }}>{"\uD83D\uDE89"}</span>
-              {Object.entries(HOME_STATIONS).map(([key, s]) => (
-                <button key={key} onClick={() => setHomeStation(key)} style={{
-                  padding: "5px 10px", borderRadius: 8, cursor: "pointer", fontSize: 10, fontWeight: 600,
-                  backgroundColor: homeStation === key ? "rgba(16,185,129,.2)" : "rgba(30,41,59,.5)",
-                  color: homeStation === key ? "#6ee7b7" : "#94a3b8",
-                  border: homeStation === key ? "1px solid rgba(16,185,129,.4)" : "1px solid rgba(148,163,184,.06)",
-                }}>{s.name}</button>
-              ))}
             </div>
             {/* Direction selector */}
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -670,7 +678,7 @@ export default function App() {
               <>
                 <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: "#c7d2fe" }}>Leave home at {fmt(J.leave)}</div>
                 <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 6, lineHeight: 1.6 }}>
-                  {"\uD83D\uDEB2"} Bike {bHS}min to {stn.name} {"\u2192"} {"\uD83D\uDE82"} {J.tStr} train ({J.trainMins}min) {"\u2192"} arr {J.arrStnStr || fmt(J.arrStn)} {"\u2192"} {"\uD83D\uDEB2"} Bike {bSS}min to college
+                  {"\uD83D\uDEB2"} Bike {bHS}min to {activeStn.name} {"\u2192"} {"\uD83D\uDE82"} {J.tStr} train ({J.trainMins}min) {"\u2192"} arr {J.arrStnStr || fmt(J.arrStn)} {"\u2192"} {"\uD83D\uDEB2"} Bike {bSS}min to college
                 </div>
                 {J.late ? <div style={{ fontSize: 13, color: "#fca5a5", marginTop: 6, fontWeight: 700 }}>{"\u26A0\uFE0F"} Arrive {fmt(J.arrSchool)} {"\u2014"} LATE for {arriveByStr} start!</div>
                   : <div style={{ fontSize: 12, color: "#6ee7b7", marginTop: 6 }}>{"\u2705"} Arrive {fmt(J.arrSchool)} {"\u2014"} {J.spare} minutes spare</div>}
@@ -679,7 +687,7 @@ export default function App() {
               <>
                 <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: "#c7d2fe" }}>Home by ~{fmt(J.arrHome)}</div>
                 <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 6, lineHeight: 1.6 }}>
-                  {"\uD83C\uDF93"} Finishes {finishStr} {"\u2192"} {"\uD83D\uDEB2"} {bSS2}min to station {"\u2192"} {"\uD83D\uDE82"} {J.tStr} train ({J.trainMins}min) {"\u2192"} arr {J.arrStnStr || fmt(J.arrStn)} {"\u2192"} {"\uD83D\uDEB2"} {bSH}min home
+                  {"\uD83C\uDF93"} Finishes {finishStr} {"\u2192"} {"\uD83D\uDEB2"} {bSS}min to station {"\u2192"} {"\uD83D\uDE82"} {J.tStr} train ({J.trainMins}min) {"\u2192"} arr {J.arrStnStr || fmt(J.arrStn)} {"\u2192"} {"\uD83D\uDEB2"} {bSH}min home
                 </div>
               </>
             )}
@@ -689,23 +697,28 @@ export default function App() {
         {/* JOURNEY TIMELINE */}
         {hasClass && inTerm && (
           <Card style={{ marginBottom: 14, animation: "slideIn .55s" }}>
-            <Lbl icon={"\uD83D\uDCCD"}>{dir === "to" ? "Journey to College" : "Journey Home"}</Lbl>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <Lbl icon={"\uD83D\uDCCD"}>{dir === "to" ? "Journey to College" : "Journey Home"}</Lbl>
+              <a href={liveTrainsUrl} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 12, backgroundColor: "rgba(16,185,129,.1)", border: "1px solid rgba(16,185,129,.2)", textDecoration: "none", fontSize: 10, fontWeight: 700, color: "#6ee7b7" }}>
+                <Pulse /> View Live &rarr;
+              </a>
+            </div>
             <div style={{ display: "flex", alignItems: "center", gap: 0, flexWrap: "wrap", justifyContent: "center" }}>
               {(dir === "to" ? [
                 { icon: "\uD83C\uDFE0", lbl: "Home", time: fmt(J.leave), sub: HOME_POSTCODE },
-                { icon: "\uD83D\uDEB2", lbl: `${bHS}m`, sub: `${stn.bikeMi}mi`, tr: true },
-                { icon: "\uD83D\uDE89", lbl: stn.name, time: J.tStr, sub: stn.code },
+                { icon: "\uD83D\uDEB2", lbl: `${bHS}m`, sub: `${activeStn.bikeMi}mi`, tr: true },
+                { icon: "\uD83D\uDE89", lbl: activeStn.name, time: J.tStr, sub: activeStn.code },
                 { icon: "\uD83D\uDE82", lbl: `${J.trainMins}m`, sub: J.arrStnStr ? "Live" : "Est.", tr: true },
                 { icon: "\uD83D\uDE89", lbl: SCHOOL_STATION, time: J.arrStnStr || fmt(J.arrStn), sub: SCHOOL_STATION_CODE },
                 { icon: "\uD83D\uDEB2", lbl: `${bSS}m`, sub: `${BIKE_STN_SCHOOL.mi}mi`, tr: true },
                 { icon: "\uD83C\uDFEB", lbl: "College", time: fmt(J.arrSchool), sub: J.late ? "LATE!" : "\u2713", late: J.late },
               ] : [
                 { icon: "\uD83C\uDFEB", lbl: "College", time: finishStr, sub: "Finish" },
-                { icon: "\uD83D\uDEB2", lbl: `${bSS2}m`, sub: `${BIKE_STN_SCHOOL.mi}mi`, tr: true },
+                { icon: "\uD83D\uDEB2", lbl: `${bSS}m`, sub: `${BIKE_STN_SCHOOL.mi}mi`, tr: true },
                 { icon: "\uD83D\uDE89", lbl: SCHOOL_STATION, time: J.tStr, sub: SCHOOL_STATION_CODE },
                 { icon: "\uD83D\uDE82", lbl: `${J.trainMins}m`, sub: J.arrStnStr ? "Live" : "Est.", tr: true },
-                { icon: "\uD83D\uDE89", lbl: stn.name, time: J.arrStnStr || fmt(J.arrStn), sub: stn.code },
-                { icon: "\uD83D\uDEB2", lbl: `${bSH}m`, sub: `${stn.bikeMi}mi`, tr: true },
+                { icon: "\uD83D\uDE89", lbl: activeStn.name, time: J.arrStnStr || fmt(J.arrStn), sub: activeStn.code },
+                { icon: "\uD83D\uDEB2", lbl: `${bSH}m`, sub: `${activeStn.bikeMi}mi`, tr: true },
                 { icon: "\uD83C\uDFE0", lbl: "Home", time: fmt(J.arrHome), sub: HOME_POSTCODE },
               ]).map((s, i, a) => (
                 <div key={i} style={{ display: "flex", alignItems: "center" }}>
@@ -720,6 +733,35 @@ export default function App() {
               ))}
             </div>
             {bikeAdj > 0 && <div style={{ marginTop: 8, padding: "5px 10px", borderRadius: 8, backgroundColor: "rgba(245,158,11,.1)", border: "1px solid rgba(245,158,11,.2)", fontSize: 11, color: "#fcd34d" }}>{"\u26A0\uFE0F"} Bike +{bikeAdj}min ({pRain ? "rain" : "wind"})</div>}
+
+            {/* 3-TRAIN PICKER */}
+            {allTrains.length > 0 && (
+              <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(148,163,184,.06)" }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: "#818cf8", letterSpacing: 1, marginBottom: 6 }}>TRAIN OPTIONS</div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {[trainBefore, activeTrain, trainAfter].filter(Boolean).map((t) => {
+                    const isActive = activeTrain && trainKey(t) === trainKey(activeTrain);
+                    return (
+                      <div key={trainKey(t)} onClick={() => setSelTrain(isActive ? null : trainKey(t))}
+                        style={{
+                          flex: 1, padding: "8px 10px", borderRadius: 10, cursor: "pointer",
+                          backgroundColor: isActive ? "rgba(99,102,241,.15)" : "rgba(30,41,59,.5)",
+                          border: isActive ? "1px solid rgba(99,102,241,.4)" : "1px solid rgba(148,163,184,.06)",
+                          textAlign: "center", transition: "all .15s",
+                        }}>
+                        {isActive && <div style={{ fontSize: 8, fontWeight: 700, color: "#818cf8", marginBottom: 2 }}>RECOMMENDED</div>}
+                        <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 16, fontWeight: 700, color: isActive ? "#e2e8f0" : "#94a3b8" }}>{t.std}</div>
+                        <div style={{ display: "flex", justifyContent: "center", gap: 4, marginTop: 2 }}>
+                          <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4, backgroundColor: t.stnKey === "GOD" ? "rgba(16,185,129,.15)" : "rgba(99,102,241,.15)", color: t.stnKey === "GOD" ? "#6ee7b7" : "#818cf8" }}>{t.stnKey}</span>
+                        </div>
+                        {t.arrTime && <div style={{ fontSize: 10, color: "#818cf8", marginTop: 2 }}>arr {t.arrTime}</div>}
+                        {t.etd === "Cancelled" && <div style={{ fontSize: 9, color: "#ef4444", fontWeight: 700 }}>CANCELLED</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </Card>
         )}
 
@@ -784,7 +826,7 @@ export default function App() {
           </Card>
         </div>
 
-        {/* TODAY'S ACTIVITIES — what Tom is doing */}
+        {/* TODAY'S ACTIVITIES */}
         {hasClass && inTerm && dayActivities.length > 0 && (
           <Card style={{ marginTop: 14, animation: "slideIn .72s" }} glow="rgba(16,185,129,.08)">
             <Lbl icon={"\u26BD"}>{isToday ? "Today's Activities" : `${tt.label}'s Activities`}</Lbl>
@@ -818,7 +860,6 @@ export default function App() {
             {showActivitySafety && (aSafety.tips.length > 0 || asAfterSafety.tips.length > 0) && (
               <Card style={{ animation: "slideIn .75s" }} glow={aSafety.warnings.length > 0 || asAfterSafety.warnings.length > 0 ? "rgba(245,158,11,.08)" : undefined}>
                 <Lbl icon={"\uD83D\uDEE1\uFE0F"}>Activity Safety</Lbl>
-                {/* PE warnings */}
                 {aSafety.warnings.map((w, i) => (
                   <div key={`pw${i}`} style={{ padding: "6px 10px", borderRadius: 8, marginBottom: 6, backgroundColor: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.15)", fontSize: 11, color: "#fca5a5", fontWeight: 600 }}>{"\u26A0\uFE0F"} {w}</div>
                 ))}
@@ -855,176 +896,12 @@ export default function App() {
           </div>
         )}
 
-        {/* ═══ FITNESS TRACKER ═══ */}
-        {showFitness && (
-          <Card style={{ marginTop: 14, animation: "slideIn .82s" }} glow="rgba(168,85,247,.08)">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-              <Lbl icon={"\uD83C\uDFCB\uFE0F"}>Fitness Tracker</Lbl>
-              <a href="https://apps.apple.com/app/apple-fitness/id1208224953" target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 12, backgroundColor: "rgba(16,185,129,.1)", border: "1px solid rgba(16,185,129,.2)", textDecoration: "none", fontSize: 10, fontWeight: 700, color: "#6ee7b7" }}>
-                {"\uF8FF"} Open Apple Fitness
-              </a>
-            </div>
-
-            <div style={{ fontSize: 11, color: "#a78bfa", marginBottom: 10, padding: "5px 10px", borderRadius: 8, backgroundColor: "rgba(139,92,246,.06)", border: "1px solid rgba(139,92,246,.1)" }}>
-              Log workouts here and track in Apple Fitness for full health data. Cycling commute auto-estimates below.
-            </div>
-
-            {/* Today's auto-estimated activity */}
-            {(() => {
-              const todayStr = todayKey(new Date());
-              const todayLogs = fitnessLog.filter(e => e.date === todayStr);
-              const todayCal = todayLogs.reduce((s, e) => s + (e.calories || 0), 0);
-              const todayMins = todayLogs.reduce((s, e) => s + (e.mins || 0), 0);
-
-              // Auto-estimate from today's commute cycling
-              const cycleToday = isToday && hasClass && inTerm;
-              const cycleMins = cycleToday ? (bHS + bSS + bSS2 + bSH) : 0;
-              const cycleCal = cycleMins * (EX_CAL.Cycling || 8);
-              const cycleKm = cycleToday ? ((stn.bikeMi + BIKE_STN_SCHOOL.mi) * 2 * 1.61).toFixed(1) : 0;
-
-              // PE estimate
-              const peMins = peSession ? 60 : 0;
-              const peCal = peSession ? 60 * (EX_CAL[peSession.activity] || 7) : 0;
-
-              // After-school estimate
-              const asMins = (showAfterSchool && afterSchool) ? 60 : 0;
-              const asCal = (showAfterSchool && afterSchool) ? 60 * (EX_CAL[afterSchool.activity] || 7) : 0;
-
-              const totalMins = todayMins + cycleMins + peMins + asMins;
-              const totalCal = todayCal + cycleCal + peCal + asCal;
-
-              // Weekly summary
-              const weekStart = dayClone(new Date(), -new Date().getDay() + 1);
-              const weekLogs = fitnessLog.filter(e => e.date >= todayKey(weekStart));
-              const weekCal = weekLogs.reduce((s, e) => s + (e.calories || 0), 0);
-              const weekMins = weekLogs.reduce((s, e) => s + (e.mins || 0), 0);
-
-              return <>
-                {/* Today's summary */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
-                  <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, backgroundColor: "rgba(168,85,247,.08)", border: "1px solid rgba(168,85,247,.15)" }}>
-                    <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: "#c084fc" }}>{totalMins}</div>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8", letterSpacing: 1 }}>MINS TODAY</div>
-                  </div>
-                  <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, backgroundColor: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.12)" }}>
-                    <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: "#f87171" }}>{totalCal}</div>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8", letterSpacing: 1 }}>CALS TODAY</div>
-                  </div>
-                  <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, backgroundColor: "rgba(16,185,129,.06)", border: "1px solid rgba(16,185,129,.12)" }}>
-                    <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{weekCal + totalCal}</div>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8", letterSpacing: 1 }}>CALS THIS WEEK</div>
-                  </div>
-                </div>
-
-                {/* Auto-estimated activities */}
-                {cycleToday && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 10, backgroundColor: "rgba(99,102,241,.06)", border: "1px solid rgba(99,102,241,.1)", marginBottom: 6 }}>
-                    <span style={{ fontSize: 20 }}>{"\uD83D\uDEB4"}</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#e2e8f0" }}>Cycling Commute (est.)</div>
-                      <div style={{ fontSize: 10, color: "#94a3b8" }}>{cycleMins} min {"\u00B7"} {cycleKm} km {"\u00B7"} ~{cycleCal} cal</div>
-                    </div>
-                    <Badge s="info">Auto</Badge>
-                  </div>
-                )}
-                {peSession && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 10, backgroundColor: "rgba(16,185,129,.06)", border: "1px solid rgba(16,185,129,.1)", marginBottom: 6 }}>
-                    <span style={{ fontSize: 20 }}>{"\u26BD"}</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#e2e8f0" }}>PE {"\u2014"} {peSession.activity} (est.)</div>
-                      <div style={{ fontSize: 10, color: "#94a3b8" }}>{peMins} min {"\u00B7"} ~{peCal} cal</div>
-                    </div>
-                    <Badge s="good">PE</Badge>
-                  </div>
-                )}
-                {showAfterSchool && afterSchool && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 10, backgroundColor: "rgba(245,158,11,.06)", border: "1px solid rgba(245,158,11,.1)", marginBottom: 6 }}>
-                    <span style={{ fontSize: 20 }}>{"\uD83C\uDFC6"}</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#e2e8f0" }}>{afterSchool.name} (est.)</div>
-                      <div style={{ fontSize: 10, color: "#94a3b8" }}>{asMins} min {"\u00B7"} ~{asCal} cal</div>
-                    </div>
-                    <Badge s="warning">Club</Badge>
-                  </div>
-                )}
-
-                {/* Manual logged exercises */}
-                {todayLogs.length > 0 && (
-                  <div style={{ marginTop: 6 }}>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: "#c084fc", letterSpacing: 1, marginBottom: 4 }}>LOGGED TODAY</div>
-                    {todayLogs.map(e => (
-                      <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", borderRadius: 8, backgroundColor: "rgba(168,85,247,.05)", marginBottom: 3 }}>
-                        <span style={{ fontSize: 14 }}>{e.icon || "\uD83C\uDFCB\uFE0F"}</span>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 11, fontWeight: 600, color: "#e2e8f0" }}>{e.name}</div>
-                          <div style={{ fontSize: 10, color: "#94a3b8" }}>{e.mins} min {"\u00B7"} ~{e.calories} cal</div>
-                        </div>
-                        <button onClick={() => removeExercise(e.id)} style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", fontSize: 12, padding: 4 }}>{"\u2715"}</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Quick-log buttons */}
-                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(148,163,184,.06)" }}>
-                  <div style={{ fontSize: 9, fontWeight: 700, color: "#818cf8", letterSpacing: 1, marginBottom: 6 }}>QUICK LOG</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                    {[
-                      { name: "Push-ups", mins: 10, cal: 70, icon: "\uD83D\uDCAA" },
-                      { name: "Sit-ups", mins: 10, cal: 60, icon: "\uD83E\uDDBE" },
-                      { name: "Running (20min)", mins: 20, cal: 200, icon: "\uD83C\uDFC3" },
-                      { name: "Weights (30min)", mins: 30, cal: 180, icon: "\uD83C\uDFCB\uFE0F" },
-                      { name: "Home Workout", mins: 20, cal: 140, icon: "\uD83C\uDFE0" },
-                      { name: "Stretching", mins: 15, cal: 45, icon: "\uD83E\uDDD8" },
-                    ].map((ex, i) => (
-                      <button key={i} onClick={() => logExercise({ name: ex.name, mins: ex.mins, calories: ex.cal, icon: ex.icon })} style={{
-                        padding: "5px 10px", borderRadius: 8, border: "1px solid rgba(168,85,247,.2)", backgroundColor: "rgba(168,85,247,.08)",
-                        color: "#c084fc", fontSize: 10, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, transition: "all .15s",
-                      }}>{ex.icon} {ex.name}</button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Weekly bar chart */}
-                {(() => {
-                  const bars = [];
-                  for (let i = 0; i < 7; i++) {
-                    const d = dayClone(weekStart, i);
-                    const dk = todayKey(d);
-                    const dayLogs = fitnessLog.filter(e => e.date === dk);
-                    const dayCal = dayLogs.reduce((s, e) => s + (e.calories || 0), 0);
-                    const isT = dk === todayKey(new Date());
-                    // Add auto-estimates for today
-                    const autoEst = isT ? (cycleCal + peCal + asCal) : 0;
-                    bars.push({ day: DAYS[d.getDay()].slice(0, 1), cal: dayCal + autoEst, isToday: isT });
-                  }
-                  const maxCal = Math.max(...bars.map(b => b.cal), 1);
-                  return (
-                    <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(148,163,184,.06)" }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, color: "#818cf8", letterSpacing: 1, marginBottom: 8 }}>THIS WEEK ({weekMins + totalMins} min total)</div>
-                      <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 60 }}>
-                        {bars.map((b, i) => (
-                          <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-                            <div style={{ fontSize: 8, fontWeight: 700, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>{b.cal > 0 ? b.cal : ""}</div>
-                            <div style={{ width: "100%", height: Math.max(b.cal / maxCal * 40, 2), borderRadius: 4, backgroundColor: b.isToday ? "#c084fc" : "rgba(168,85,247,.3)", transition: "all .3s" }} />
-                            <div style={{ fontSize: 9, fontWeight: 700, color: b.isToday ? "#c084fc" : "#64748b" }}>{b.day}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
-              </>;
-            })()}
-          </Card>
-        )}
-
-        {/* ═══ NUTRITION & RECIPES ═══ */}
+        {/* NUTRITION & RECIPES */}
         {showNutrition && (
           <Card style={{ marginTop: 14, animation: "slideIn .84s" }} glow="rgba(245,158,11,.06)">
             <Lbl icon={"\uD83C\uDF57"}>Muscle Fuel & Nutrition</Lbl>
 
-            {/* Pre-workout (if PE day, morning direction) */}
+            {/* Pre-workout (if PE day) */}
             {peSession && (
               <div style={{ marginBottom: 12 }}>
                 <div style={{ fontSize: 10, fontWeight: 700, color: "#6ee7b7", letterSpacing: 1, marginBottom: 6 }}>{"\u26A1"} PRE-WORKOUT {"\u2014"} Eat before {peSession.activity}</div>
@@ -1146,7 +1023,7 @@ export default function App() {
         <Card style={{ marginTop: 14, animation: "slideIn .8s" }} glow={sts === "danger" ? "rgba(239,68,68,.12)" : undefined}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <Lbl icon={dir === "to" ? "\uD83C\uDFEB" : "\uD83C\uDFE0"}>{dir === "to" ? `Trains ${stn.code} \u2192 ${SCHOOL_STATION_CODE}` : `Trains ${SCHOOL_STATION_CODE} \u2192 ${stn.code}`}</Lbl>
+              <Lbl icon={dir === "to" ? "\uD83C\uDFEB" : "\uD83C\uDFE0"}>{dir === "to" ? "Trains to Woking" : "Trains from Woking"}</Lbl>
               <Badge s={sts}>{sts === "good" ? "Live" : sts === "warning" ? "Delays" : "Disrupted"}</Badge>
             </div>
             <div style={{ fontSize: 10, color: "#64748b" }}>{lastRef ? fmt(lastRef) : ""} {"\u00B7"} 60s</div>
@@ -1160,18 +1037,20 @@ export default function App() {
 
           {alerts.length > 0 && <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 10, backgroundColor: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)" }}>{alerts.map((a, i) => <div key={i} style={{ fontSize: 11, color: "#fca5a5" }}>{typeof a === "string" ? a.replace(/<[^>]*>/g, "") : ""}</div>)}</div>}
 
-          <div style={{ display: "grid", gridTemplateColumns: "55px 55px 60px 40px 1fr 80px", gap: 6, padding: "4px 12px", marginBottom: 2 }}>
-            {["Departs", "Arrives", "Status", "Plat.", "Destination", ""].map((h, i) => <span key={i} style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: "#475569", textTransform: "uppercase" }}>{h}</span>)}
+          {/* Train list header */}
+          <div style={{ display: "grid", gridTemplateColumns: "40px 55px 55px 60px 36px 1fr 80px", gap: 6, padding: "4px 12px", marginBottom: 2 }}>
+            {["Stn", "Departs", "Arrives", "Status", "Plat.", "Destination", ""].map((h, i) => <span key={i} style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: "#475569", textTransform: "uppercase" }}>{h}</span>)}
           </div>
 
-          {trains.length === 0 ? <div style={{ textAlign: "center", padding: 20, color: "#64748b" }}><div style={{ fontSize: 22, marginBottom: 4 }}>{"\uD83D\uDE82"}</div><div style={{ fontSize: 12 }}>{isFuture ? "Live trains show today's schedule as a guide" : "No trains listed"}</div></div>
-            : trains.map((t, i) => {
+          {allTrains.length === 0 ? <div style={{ textAlign: "center", padding: 20, color: "#64748b" }}><div style={{ fontSize: 22, marginBottom: 4 }}>{"\uD83D\uDE82"}</div><div style={{ fontSize: 12 }}>{isFuture ? "Live trains show today's schedule as a guide" : "No trains listed"}</div></div>
+            : allTrains.map((t, i) => {
               const sc = t.std || "\u2014"; const es = t.etd || "\u2014";
               const dly = es !== "On time" && es !== sc && es !== "\u2014" && es !== "Cancelled"; const cnc = es === "Cancelled";
-              const act = activeTrain && t.std === activeTrain.std;
+              const act = activeTrain && trainKey(t) === trainKey(activeTrain);
               const arr = t.arrTime || "\u2014";
               return (
-                <div key={i} className="ts" onClick={() => setSelTrain(t.std === selTrain ? null : t.std)} style={{ display: "grid", gridTemplateColumns: "55px 55px 60px 40px 1fr 80px", alignItems: "center", gap: 6, padding: "8px 12px", backgroundColor: act ? "rgba(99,102,241,.12)" : "transparent", border: act ? "1px solid rgba(99,102,241,.3)" : "1px solid transparent" }}>
+                <div key={trainKey(t)} className="ts" onClick={() => setSelTrain(trainKey(t) === selTrain ? null : trainKey(t))} style={{ display: "grid", gridTemplateColumns: "40px 55px 55px 60px 36px 1fr 80px", alignItems: "center", gap: 6, padding: "8px 12px", backgroundColor: act ? "rgba(99,102,241,.12)" : "transparent", border: act ? "1px solid rgba(99,102,241,.3)" : "1px solid transparent" }}>
+                  <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 4px", borderRadius: 4, textAlign: "center", backgroundColor: t.stnKey === "GOD" ? "rgba(16,185,129,.15)" : "rgba(99,102,241,.15)", color: t.stnKey === "GOD" ? "#6ee7b7" : "#818cf8" }}>{t.stnKey}</span>
                   <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 15, fontWeight: 700, color: "#e2e8f0" }}>{sc}</span>
                   <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 13, fontWeight: 600, color: "#818cf8" }}>{arr}</span>
                   <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, fontWeight: 600, color: cnc ? "#ef4444" : dly ? "#f59e0b" : "#22c55e" }}>{cnc ? "CANC" : dly ? es : "On time"}</span>
@@ -1186,9 +1065,9 @@ export default function App() {
             <div style={{ marginTop: 10, padding: "10px 14px", borderRadius: 10, background: "linear-gradient(135deg,rgba(99,102,241,.1),rgba(16,185,129,.06))", border: "1px solid rgba(99,102,241,.2)" }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#818cf8" }}>
                 {dir === "to" ? (
-                  <>{"\uD83D\uDE82"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{activeTrain.std}</span> {stn.code} {"\u2192"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#818cf8" }}>{J.arrStnStr || fmt(J.arrStn)}</span> {SCHOOL_STATION_CODE} ({J.trainMins}m) {"\u2192"} Leave home <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{fmt(J.leave)}</span> {"\u2192"} {"\uD83D\uDEB2"}{bHS}m {"\u2192"} train {"\u2192"} {"\uD83D\uDEB2"}{bSS}m {"\u2192"} {J.late ? <span style={{ color: "#fca5a5" }}>{"\u26A0\uFE0F"} LATE {fmt(J.arrSchool)}</span> : <span style={{ color: "#6ee7b7" }}>{"\u2705"} {fmt(J.arrSchool)} ({J.spare}m spare)</span>}</>
+                  <>{"\uD83D\uDE82"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{activeTrain.std}</span> {activeStn.code} {"\u2192"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#818cf8" }}>{J.arrStnStr || fmt(J.arrStn)}</span> {SCHOOL_STATION_CODE} ({J.trainMins}m) {"\u2192"} Leave home <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{fmt(J.leave)}</span> {"\u2192"} {"\uD83D\uDEB2"}{bHS}m {"\u2192"} train {"\u2192"} {"\uD83D\uDEB2"}{bSS}m {"\u2192"} {J.late ? <span style={{ color: "#fca5a5" }}>{"\u26A0\uFE0F"} LATE {fmt(J.arrSchool)}</span> : <span style={{ color: "#6ee7b7" }}>{"\u2705"} {fmt(J.arrSchool)} ({J.spare}m spare)</span>}</>
                 ) : (
-                  <>{"\uD83D\uDE82"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{activeTrain.std}</span> {SCHOOL_STATION_CODE} {"\u2192"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#818cf8" }}>{J.arrStnStr || fmt(J.arrStn)}</span> {stn.code} ({J.trainMins}m) {"\u2192"} Leave college <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{fmt(J.leaveSchool)}</span> {"\u2192"} {"\uD83D\uDEB2"}{bSS2}m {"\u2192"} train {"\u2192"} {"\uD83D\uDEB2"}{bSH}m {"\u2192"} <span style={{ color: "#6ee7b7" }}>{"\uD83C\uDFE0"} {fmt(J.arrHome)}</span></>
+                  <>{"\uD83D\uDE82"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{activeTrain.std}</span> {SCHOOL_STATION_CODE} {"\u2192"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#818cf8" }}>{J.arrStnStr || fmt(J.arrStn)}</span> {activeStn.code} ({J.trainMins}m) {"\u2192"} Leave college <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{fmt(J.leaveSchool)}</span> {"\u2192"} {"\uD83D\uDEB2"}{bSS}m {"\u2192"} train {"\u2192"} {"\uD83D\uDEB2"}{bSH}m {"\u2192"} <span style={{ color: "#6ee7b7" }}>{"\uD83C\uDFE0"} {fmt(J.arrHome)}</span></>
                 )}
               </div>
             </div>
@@ -1198,10 +1077,10 @@ export default function App() {
         {/* QUICK LINKS */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginTop: 14 }}>
           {[
-            { e: "\uD83D\uDE82", l: "Trains", u: `https://www.nationalrail.co.uk/live-trains/departures/${stn.code}/${SCHOOL_STATION_CODE}` },
+            { e: "\uD83C\uDFAB", l: "Book Train", u: trainlineUrl },
+            { e: "\uD83D\uDE82", l: "Live Trains", u: liveTrainsUrl },
             { e: "\u26A0\uFE0F", l: "Alerts", u: "https://www.nationalrail.co.uk/status-and-disruptions/" },
             { e: "\uD83D\uDCDE", l: "College", u: "https://www.woking.ac.uk/contact/" },
-            { e: "\uD83D\uDE8C", l: "Buses", u: "https://www.stagecoachbus.com/plan-a-journey" },
           ].map((l, i) => (
             <a key={i} href={l.u} target="_blank" rel="noopener noreferrer" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "10px 6px", borderRadius: 12, textDecoration: "none", backgroundColor: "rgba(15,23,42,.5)", border: "1px solid rgba(148,163,184,.06)" }}>
               <span style={{ fontSize: 18 }}>{l.e}</span><span style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8" }}>{l.l}</span>
@@ -1232,7 +1111,7 @@ export default function App() {
 
         {/* FOOTER */}
         <div style={{ textAlign: "center", marginTop: 16, fontSize: 10, color: "#475569" }}>
-          <div>{HOME_POSTCODE} {"\uD83D\uDEB2"} {stn.name} {"\uD83D\uDE82"} {SCHOOL_STATION} {"\uD83D\uDEB2"} {SCHOOL_NAME}</div>
+          <div>{HOME_POSTCODE} {"\uD83D\uDEB2"} Godalming / Farncombe {"\uD83D\uDE82"} {SCHOOL_STATION} {"\uD83D\uDEB2"} {SCHOOL_NAME}</div>
           <div style={{ marginTop: 3 }}>National Rail Darwin {"\u00B7"} Open-Meteo {"\u00B7"} Term: {TERM_START.toLocaleDateString("en-GB", { day: "numeric", month: "short" })} {"\u2013"} {TERM_END.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</div>
           <div style={{ marginTop: 6 }}><button onClick={() => { fetchTrains(); fetchWx(); }} style={{ padding: "5px 14px", borderRadius: 8, border: "1px solid rgba(99,102,241,.3)", backgroundColor: "rgba(99,102,241,.1)", color: "#818cf8", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>{"\uD83D\uDD04"} Refresh</button></div>
         </div>
