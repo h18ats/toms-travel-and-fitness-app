@@ -14,6 +14,12 @@ const SCHOOL_NAME = "Woking College";       // College name
 const WX_LAT = 51.1854;                    // Weather latitude (Godalming)
 const WX_LON = -0.6127;                    // Weather longitude
 
+// ── GEOLOCATION ────────────────────────────────────────────
+const HOME_LAT = 51.186;
+const HOME_LON = -0.613;
+const COLLEGE_LAT = 51.319;
+const COLLEGE_LON = -0.556;
+
 // ── HOME STATIONS (both shown in combined train list) ────────
 const HOME_STATIONS = {
   GOD: { name: "Godalming", code: "GOD", bikeMi: 2.5, bikeMins: 12 },
@@ -226,6 +232,14 @@ const parseTT = (s, ref) => { if (!s || s === "On time" || s === "Cancelled" || 
 const dayClone = (d, off = 0) => { const x = new Date(d); x.setDate(x.getDate() + off); x.setHours(0, 0, 0, 0); return x; };
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+const haversine = (lat1, lon1, lat2, lon2) => {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+};
+
 function nextSchoolDay(from) {
   for (let i = 0; i < 8; i++) {
     const d = dayClone(from, i);
@@ -389,7 +403,28 @@ export default function App() {
   const [showTravelSafety, setShowTravelSafety] = useState(true);
   const [showNutrition, setShowNutrition] = useState(true);
 
+  // Geolocation
+  const [userLoc, setUserLoc] = useState(null);
+  const [locLabel, setLocLabel] = useState(null);
+
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
+
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    const update = (pos) => {
+      const { latitude, longitude } = pos.coords;
+      setUserLoc({ lat: latitude, lon: longitude });
+      const distHome = haversine(latitude, longitude, HOME_LAT, HOME_LON);
+      const distCollege = haversine(latitude, longitude, COLLEGE_LAT, COLLEGE_LON);
+      if (distHome < 1) setLocLabel("At home");
+      else if (distCollege < 1) setLocLabel("At college");
+      else if (distHome < distCollege) setLocLabel("Near home");
+      else setLocLabel("Near college");
+    };
+    navigator.geolocation.getCurrentPosition(update, () => {}, { enableHighAccuracy: false });
+    const wid = navigator.geolocation.watchPosition(update, () => {}, { enableHighAccuracy: false, maximumAge: 60000 });
+    return () => navigator.geolocation.clearWatch(wid);
+  }, []);
 
   // ═══════════════════════════════════════════════════════════
   // SMART DATE + DIRECTION LOGIC
@@ -410,13 +445,18 @@ export default function App() {
       const endMins = hm(todayTT.end).h * 60 + hm(todayTT.end).m;
       // Check if after-school extends the day
       const as = AFTER_SCHOOL[today.getDay()];
-      const actualEndMins = (showAfterSchool && as) ? hm(as.time.split("-")[1]).h * 60 + hm(as.time.split("-")[1]).m : endMins;
+      // Account for gym sessions on early-finish days
+      const todayGymSlots = getGymSlots(todayTT.sessions);
+      const todayEarlyGym = todayGymSlots.find(s => s.type === "earlyFinish");
+      const gymEndMins = todayEarlyGym ? (hm(todayEarlyGym.doneBy).h * 60 + hm(todayEarlyGym.doneBy).m) : endMins;
+      const actualEndMins = (showAfterSchool && as) ? hm(as.time.split("-")[1]).h * 60 + hm(as.time.split("-")[1]).m : gymEndMins;
 
+      const locDir = (locLabel === "At college" || locLabel === "Near college") ? "from" : "to";
       if (nowMins < startMins + 30) {
-        return { planDate: today, dir: manualDir || "to", modeLabel: "Morning \u2014 time to head to college", modeIcon: "\uD83C\uDF05" };
+        return { planDate: today, dir: manualDir || locDir, modeLabel: "Morning \u2014 time to head to college", modeIcon: "\uD83C\uDF05" };
       }
       if (nowMins < actualEndMins) {
-        return { planDate: today, dir: manualDir || "from", modeLabel: "At college \u2014 planning your trip home", modeIcon: "\uD83D\uDCDA" };
+        return { planDate: today, dir: manualDir || (locLabel === "At home" || locLabel === "Near home" ? "to" : "from"), modeLabel: "At college \u2014 planning your trip home", modeIcon: "\uD83D\uDCDA" };
       }
       const nxt = nextSchoolDay(dayClone(now, 1));
       if (nxt) {
@@ -434,7 +474,7 @@ export default function App() {
       return { planDate: nxt, dir: manualDir || "to", modeLabel: `${timeOfDay} \u2014 next college ${when} (${DAYS[nxt.getDay()]})`, modeIcon: "\uD83C\uDF19" };
     }
     return { planDate: today, dir: manualDir || "to", modeLabel: "Outside term dates", modeIcon: "\uD83C\uDFD6\uFE0F" };
-  }, [now, manualDate, manualDir, showAfterSchool]);
+  }, [now, manualDate, manualDir, showAfterSchool, locLabel]);
 
   const isToday = planDate.toDateString() === new Date().toDateString();
   const isFuture = !isToday;
@@ -565,7 +605,7 @@ export default function App() {
         const arrCollege = addM(arrDest, bSS + BUF);
         if (arrCollege <= arriveBy) best = t;
       }
-      return best || allTrains.find(t => t.etd !== "Cancelled") || null;
+      return best || null;
     }
     // "from" direction: first catchable train after finish
     for (const t of allTrains) {
@@ -574,7 +614,7 @@ export default function App() {
       if (!dep) continue;
       if (dep >= addM(finishAt, bSS + BUF)) return t;
     }
-    return allTrains.find(t => t.etd !== "Cancelled") || null;
+    return null;
   }, [dir, allTrains, planDate, arriveBy, finishAt, bikeAdj, bSS, isToday, now]);
 
   const activeTrain = selTrain ? allTrains.find(t => trainKey(t) === selTrain) : autoTrain;
@@ -592,7 +632,9 @@ export default function App() {
   // Journey calculation
   const J = useMemo(() => {
     if (dir === "to") {
-      const tDep = activeTrain ? (parseTT(activeTrain.etd === "On time" ? activeTrain.std : activeTrain.etd, planDate) || parseTT(activeTrain.std, planDate)) : makeT(planDate, hm(arriveByStr).h, hm(arriveByStr).m);
+      const tDep = activeTrain
+        ? (parseTT(activeTrain.etd === "On time" ? activeTrain.std : activeTrain.etd, planDate) || parseTT(activeTrain.std, planDate))
+        : addM(arriveBy, -(bSS + BUF + TRAIN_MINS));
       const leave = addM(tDep, -(bHS + BUF));
       const arrStn = (activeTrain?.arrTime ? parseTT(activeTrain.arrTime, planDate) : null) || addM(tDep, TRAIN_MINS);
       const trainMinsActual = diffM(arrStn, tDep);
@@ -624,11 +666,12 @@ export default function App() {
 
   // Trainline booking URL
   const trainlineUrl = useMemo(() => {
-    const depStn = dir === "to" ? (activeStn?.code || "GOD") : SCHOOL_STATION_CODE;
-    const arrStn = dir === "to" ? SCHOOL_STATION_CODE : (activeStn?.code || "GOD");
-    const dt = planDate.toISOString().split("T")[0] + "T" + (activeTrain?.std || "08:00") + ":00";
-    return `https://www.thetrainline.com/book/results?journeySearchType=single&origin=${depStn}&destination=${arrStn}&outwardDate=${encodeURIComponent(dt)}&outwardDateType=departAfter&passengers%5B%5D=2008-01-01%7C16-25-railcard`;
-  }, [dir, activeStn, planDate, activeTrain]);
+    const depName = dir === "to" ? (activeStn?.name || "Godalming") : SCHOOL_STATION;
+    const arrName = dir === "to" ? SCHOOL_STATION : (activeStn?.name || "Godalming");
+    const timeStr = activeTrain?.std || (dir === "to" ? fmt(J.tDep) : fmt(J.tDep));
+    const dt = planDate.toISOString().split("T")[0] + "T" + timeStr.slice(0,5) + ":00";
+    return `https://www.thetrainline.com/book/results?journeySearchType=single&origin=${encodeURIComponent(depName)}&destination=${encodeURIComponent(arrName)}&outwardDate=${encodeURIComponent(dt)}&outwardDateType=departAfter&passengers%5B%5D=2008-01-01%7C16-25-railcard`;
+  }, [dir, activeStn, planDate, activeTrain, J]);
 
   // National Rail live departures URL
   const liveTrainsUrl = useMemo(() => {
@@ -685,6 +728,7 @@ export default function App() {
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 4, color: "#818cf8", textTransform: "uppercase" }}>{"\uD83D\uDEB2"} Tom's Travel Companion {"\uD83D\uDE82"}</div>
           <div className="header-time" style={{ fontSize: 42, fontWeight: 900, letterSpacing: -1, fontFamily: "'JetBrains Mono',monospace", background: "linear-gradient(135deg,#e2e8f0,#818cf8,#6ee7b7)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>{fmt(now)}</div>
           <div style={{ fontSize: 12, color: "#64748b" }}>{fmtLong(now)}</div>
+          {locLabel && <div style={{ fontSize: 10, color: "#6ee7b7", marginTop: 2 }}>{"\uD83D\uDCCD"} {locLabel}</div>}
         </div>
 
         {/* OPTIONAL FEATURE TOGGLES */}
@@ -763,7 +807,7 @@ export default function App() {
             </div>
             <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>
               {dir === "to"
-                ? <>Leave by <strong style={{ color: "#e2e8f0" }}>{fmt(J.leave)}</strong> {"\u2192"} college starts <strong style={{ color: J.late ? "#fca5a5" : "#e2e8f0" }}>{arriveByStr}</strong></>
+                ? <>Leave by <strong style={{ color: "#e2e8f0" }}>{fmt(J.leave)}</strong> {"\u2192"} {tt.sessions[0].subj} starts <strong style={{ color: J.late ? "#fca5a5" : "#e2e8f0" }}>{arriveByStr}</strong></>
                 : <>Leave college {"\u2192"} home by <strong style={{ color: "#e2e8f0" }}>{fmt(J.arrHome)}</strong></>}
             </div>
           </div>
@@ -781,6 +825,7 @@ export default function App() {
             {dir === "to" ? (
               <>
                 <div className="future-leave" style={{ fontSize: 26, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: "#c7d2fe" }}>Leave home at {fmt(J.leave)}</div>
+                <div style={{ fontSize: 12, color: "#a78bfa", marginTop: 4 }}>For {tt.sessions[0].subj} at {arriveByStr} in {tt.sessions[0].room}</div>
                 <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 6, lineHeight: 1.6 }}>
                   {"\uD83D\uDEB2"} Bike {bHS}min to {activeStn.name} {"\u2192"} {"\uD83D\uDE82"} {J.tStr} train ({J.trainMins}min) {"\u2192"} arr {J.arrStnStr || fmt(J.arrStn)} {"\u2192"} {"\uD83D\uDEB2"} Bike {bSS}min to college
                 </div>
@@ -804,7 +849,7 @@ export default function App() {
         {hasClass && inTerm && (
           <Card style={{ marginBottom: 14, animation: "slideIn .55s" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <Lbl icon={"\uD83D\uDCCD"}>{dir === "to" ? "Journey to College" : "Journey Home"}</Lbl>
+              <Lbl icon={"\uD83D\uDCCD"}>{dir === "to" ? `Journey to College \u2014 ${tt.sessions[0].subj} at ${arriveByStr}` : `Journey Home \u2014 ${tt.sessions[tt.sessions.length - 1].subj} ends ${tt.end}`}</Lbl>
               <a href={liveTrainsUrl} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 12, backgroundColor: "rgba(16,185,129,.1)", border: "1px solid rgba(16,185,129,.2)", textDecoration: "none", fontSize: 10, fontWeight: 700, color: "#6ee7b7" }}>
                 <Pulse /> View Live &rarr;
               </a>
@@ -872,6 +917,34 @@ export default function App() {
               </div>
             )}
           </Card>
+        )}
+
+        {/* BOOK TRAIN + LIVE TRAINS ROW */}
+        {hasClass && inTerm && (
+          <div style={{ display: "flex", gap: 10, marginBottom: 14, animation: "slideIn .57s" }}>
+            <a href={trainlineUrl} target="_blank" rel="noopener noreferrer" style={{
+              flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              padding: "12px 16px", borderRadius: 12, textDecoration: "none",
+              background: "linear-gradient(135deg,rgba(16,185,129,.12),rgba(99,102,241,.08))",
+              border: "1px solid rgba(16,185,129,.2)",
+            }}>
+              <span style={{ fontSize: 18 }}>{"\uD83C\uDFAB"}</span>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#6ee7b7" }}>Book on Trainline</div>
+                <div style={{ fontSize: 10, color: "#94a3b8" }}>
+                  {dir === "to" ? `${activeStn?.name || "Godalming"} \u2192 ${SCHOOL_STATION}` : `${SCHOOL_STATION} \u2192 ${activeStn?.name || "Godalming"}`} {"\u00B7"} 16-25 Railcard
+                </div>
+              </div>
+            </a>
+            <a href={liveTrainsUrl} target="_blank" rel="noopener noreferrer" style={{
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              padding: "12px 16px", borderRadius: 12, textDecoration: "none",
+              backgroundColor: "rgba(99,102,241,.08)", border: "1px solid rgba(99,102,241,.2)",
+            }}>
+              <Pulse />
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#818cf8" }}>Live Trains</span>
+            </a>
+          </div>
         )}
 
         {/* MAIN GRID: TIMETABLE / WEATHER / CLOTHING */}
@@ -1213,10 +1286,10 @@ export default function App() {
         {/* QUICK LINKS */}
         <div className="quick-links" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginTop: 14 }}>
           {[
-            { e: "\uD83C\uDFAB", l: "Book Train", u: trainlineUrl },
             { e: "\uD83D\uDE82", l: "Live Trains", u: liveTrainsUrl },
             { e: "\u26A0\uFE0F", l: "Alerts", u: "https://www.nationalrail.co.uk/status-and-disruptions/" },
             { e: "\uD83D\uDCDE", l: "College", u: "https://www.woking.ac.uk/contact/" },
+            { e: "\uD83D\uDDFA\uFE0F", l: "Directions", u: `https://www.google.com/maps/dir/${HOME_POSTCODE}/${encodeURIComponent(SCHOOL_NAME)}` },
           ].map((l, i) => (
             <a key={i} href={l.u} target="_blank" rel="noopener noreferrer" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "10px 6px", borderRadius: 12, textDecoration: "none", backgroundColor: "rgba(15,23,42,.5)", border: "1px solid rgba(148,163,184,.06)" }}>
               <span style={{ fontSize: 18 }}>{l.e}</span><span style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8" }}>{l.l}</span>
