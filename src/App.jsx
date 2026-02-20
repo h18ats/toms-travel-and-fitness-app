@@ -411,14 +411,28 @@ export default function App() {
   const fetchTrains = useCallback(async () => {
     try {
       const [godTo, godFrom, fncTo, fncFrom] = await Promise.all([
-        fetch(`${HUXLEY}/departures/GOD/to/${SCHOOL_STATION_CODE}/15`),
-        fetch(`${HUXLEY}/departures/${SCHOOL_STATION_CODE}/to/GOD/15`),
-        fetch(`${HUXLEY}/departures/FNC/to/${SCHOOL_STATION_CODE}/15`),
-        fetch(`${HUXLEY}/departures/${SCHOOL_STATION_CODE}/to/FNC/15`),
+        fetch(`${HUXLEY}/departures/GOD/to/${SCHOOL_STATION_CODE}/15?expand=true`),
+        fetch(`${HUXLEY}/departures/${SCHOOL_STATION_CODE}/to/GOD/15?expand=true`),
+        fetch(`${HUXLEY}/departures/FNC/to/${SCHOOL_STATION_CODE}/15?expand=true`),
+        fetch(`${HUXLEY}/departures/${SCHOOL_STATION_CODE}/to/FNC/15?expand=true`),
       ]);
       const [godToD, godFromD, fncToD, fncFromD] = await Promise.all([godTo.json(), godFrom.json(), fncTo.json(), fncFrom.json()]);
-      setTrainsGOD({ to: godToD.trainServices || [], from: godFromD.trainServices || [] });
-      setTrainsFNC({ to: fncToD.trainServices || [], from: fncFromD.trainServices || [] });
+
+      // Extract arrival time at destination from calling points
+      const addArrival = (services, destCrs) => (services || []).map(s => {
+        let arrTime = null;
+        const points = s.subsequentCallingPoints?.[0]?.callingPoint;
+        if (points) {
+          const dest = points.find(p => p.crs === destCrs);
+          if (dest) {
+            arrTime = dest.et && dest.et !== "On time" && dest.et !== "Cancelled" && dest.et !== "Delayed" ? dest.et : dest.st;
+          }
+        }
+        return { ...s, arrTime };
+      });
+
+      setTrainsGOD({ to: addArrival(godToD.trainServices, SCHOOL_STATION_CODE), from: addArrival(godFromD.trainServices, "GOD") });
+      setTrainsFNC({ to: addArrival(fncToD.trainServices, SCHOOL_STATION_CODE), from: addArrival(fncFromD.trainServices, "FNC") });
       setAlerts(godToD.nrccMessages ? godToD.nrccMessages.map(m => typeof m === "string" ? m : m.value || "") : []);
       setLastRef(new Date());
     } catch (e) { console.error(e); }
@@ -488,17 +502,21 @@ export default function App() {
     if (dir === "to") {
       const tDep = activeTrain ? (parseTT(activeTrain.etd === "On time" ? activeTrain.std : activeTrain.etd, planDate) || parseTT(activeTrain.std, planDate)) : idealTrainDepTo;
       const leave = addM(tDep, -(bHS + BUF));
-      const arrStn = addM(tDep, TRAIN_MINS);
+      // Use actual arrival time from API if available, else fall back to TRAIN_MINS estimate
+      const arrStn = (activeTrain?.arrTime ? parseTT(activeTrain.arrTime, planDate) : null) || addM(tDep, TRAIN_MINS);
+      const trainMinsActual = diffM(arrStn, tDep);
       const arrSchool = addM(arrStn, bSS + BUF);
       const late = arrSchool > arriveBy;
       const spare = diffM(arriveBy, arrSchool);
-      return { leave, tDep, arrStn, arrSchool, late, spare, tStr: activeTrain?.std || fmt(idealTrainDepTo) };
+      return { leave, tDep, arrStn, arrSchool, late, spare, tStr: activeTrain?.std || fmt(idealTrainDepTo), trainMins: trainMinsActual, arrStnStr: activeTrain?.arrTime || null };
     }
     const tDep = activeTrain ? (parseTT(activeTrain.etd === "On time" ? activeTrain.std : activeTrain.etd, planDate) || parseTT(activeTrain.std, planDate)) : idealTrainDepFrom;
     const leaveSchool = addM(tDep, -(bSS2 + BUF));
-    const arrStn = addM(tDep, TRAIN_MINS);
+    // Use actual arrival time from API if available, else fall back to TRAIN_MINS estimate
+    const arrStn = (activeTrain?.arrTime ? parseTT(activeTrain.arrTime, planDate) : null) || addM(tDep, TRAIN_MINS);
+    const trainMinsActual = diffM(arrStn, tDep);
     const arrHome = addM(arrStn, bSH);
-    return { leaveSchool, tDep, arrStn, arrHome, tStr: activeTrain?.std || fmt(idealTrainDepFrom) };
+    return { leaveSchool, tDep, arrStn, arrHome, tStr: activeTrain?.std || fmt(idealTrainDepFrom), trainMins: trainMinsActual, arrStnStr: activeTrain?.arrTime || null };
   }, [dir, activeTrain, planDate, idealTrainDepTo, idealTrainDepFrom, bHS, bSS, bSS2, bSH, arriveBy]);
 
   const countdown = isToday ? diffM(dir === "to" ? J.leave : J.leaveSchool, now) : null;
@@ -652,7 +670,7 @@ export default function App() {
               <>
                 <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: "#c7d2fe" }}>Leave home at {fmt(J.leave)}</div>
                 <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 6, lineHeight: 1.6 }}>
-                  {"\uD83D\uDEB2"} Bike {bHS}min to {stn.name} {"\u2192"} {"\uD83D\uDE82"} {J.tStr} train {"\u2192"} {"\uD83D\uDEB2"} Bike {bSS}min to school
+                  {"\uD83D\uDEB2"} Bike {bHS}min to {stn.name} {"\u2192"} {"\uD83D\uDE82"} {J.tStr} train ({J.trainMins}min) {"\u2192"} arr {J.arrStnStr || fmt(J.arrStn)} {"\u2192"} {"\uD83D\uDEB2"} Bike {bSS}min to college
                 </div>
                 {J.late ? <div style={{ fontSize: 13, color: "#fca5a5", marginTop: 6, fontWeight: 700 }}>{"\u26A0\uFE0F"} Arrive {fmt(J.arrSchool)} {"\u2014"} LATE for {arriveByStr} start!</div>
                   : <div style={{ fontSize: 12, color: "#6ee7b7", marginTop: 6 }}>{"\u2705"} Arrive {fmt(J.arrSchool)} {"\u2014"} {J.spare} minutes spare</div>}
@@ -661,7 +679,7 @@ export default function App() {
               <>
                 <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: "#c7d2fe" }}>Home by ~{fmt(J.arrHome)}</div>
                 <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 6, lineHeight: 1.6 }}>
-                  {"\uD83C\uDF93"} Finishes {finishStr} {"\u2192"} {"\uD83D\uDEB2"} {bSS2}min to station {"\u2192"} {"\uD83D\uDE82"} {J.tStr} train {"\u2192"} {"\uD83D\uDEB2"} {bSH}min home
+                  {"\uD83C\uDF93"} Finishes {finishStr} {"\u2192"} {"\uD83D\uDEB2"} {bSS2}min to station {"\u2192"} {"\uD83D\uDE82"} {J.tStr} train ({J.trainMins}min) {"\u2192"} arr {J.arrStnStr || fmt(J.arrStn)} {"\u2192"} {"\uD83D\uDEB2"} {bSH}min home
                 </div>
               </>
             )}
@@ -677,16 +695,16 @@ export default function App() {
                 { icon: "\uD83C\uDFE0", lbl: "Home", time: fmt(J.leave), sub: HOME_POSTCODE },
                 { icon: "\uD83D\uDEB2", lbl: `${bHS}m`, sub: `${stn.bikeMi}mi`, tr: true },
                 { icon: "\uD83D\uDE89", lbl: stn.name, time: J.tStr, sub: stn.code },
-                { icon: "\uD83D\uDE82", lbl: `${TRAIN_MINS}m`, sub: "Train", tr: true },
-                { icon: "\uD83D\uDE89", lbl: SCHOOL_STATION, time: fmt(J.arrStn), sub: SCHOOL_STATION_CODE },
+                { icon: "\uD83D\uDE82", lbl: `${J.trainMins}m`, sub: J.arrStnStr ? "Live" : "Est.", tr: true },
+                { icon: "\uD83D\uDE89", lbl: SCHOOL_STATION, time: J.arrStnStr || fmt(J.arrStn), sub: SCHOOL_STATION_CODE },
                 { icon: "\uD83D\uDEB2", lbl: `${bSS}m`, sub: `${BIKE_STN_SCHOOL.mi}mi`, tr: true },
                 { icon: "\uD83C\uDFEB", lbl: "College", time: fmt(J.arrSchool), sub: J.late ? "LATE!" : "\u2713", late: J.late },
               ] : [
                 { icon: "\uD83C\uDFEB", lbl: "College", time: finishStr, sub: "Finish" },
                 { icon: "\uD83D\uDEB2", lbl: `${bSS2}m`, sub: `${BIKE_STN_SCHOOL.mi}mi`, tr: true },
                 { icon: "\uD83D\uDE89", lbl: SCHOOL_STATION, time: J.tStr, sub: SCHOOL_STATION_CODE },
-                { icon: "\uD83D\uDE82", lbl: `${TRAIN_MINS}m`, sub: "Train", tr: true },
-                { icon: "\uD83D\uDE89", lbl: stn.name, time: fmt(J.arrStn), sub: stn.code },
+                { icon: "\uD83D\uDE82", lbl: `${J.trainMins}m`, sub: J.arrStnStr ? "Live" : "Est.", tr: true },
+                { icon: "\uD83D\uDE89", lbl: stn.name, time: J.arrStnStr || fmt(J.arrStn), sub: stn.code },
                 { icon: "\uD83D\uDEB2", lbl: `${bSH}m`, sub: `${stn.bikeMi}mi`, tr: true },
                 { icon: "\uD83C\uDFE0", lbl: "Home", time: fmt(J.arrHome), sub: HOME_POSTCODE },
               ]).map((s, i, a) => (
@@ -1142,8 +1160,8 @@ export default function App() {
 
           {alerts.length > 0 && <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 10, backgroundColor: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)" }}>{alerts.map((a, i) => <div key={i} style={{ fontSize: 11, color: "#fca5a5" }}>{typeof a === "string" ? a.replace(/<[^>]*>/g, "") : ""}</div>)}</div>}
 
-          <div style={{ display: "grid", gridTemplateColumns: "65px 72px 44px 1fr 100px", gap: 8, padding: "4px 12px", marginBottom: 2 }}>
-            {["Sched.", "Status", "Plat.", "Destination", ""].map((h, i) => <span key={i} style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: "#475569", textTransform: "uppercase" }}>{h}</span>)}
+          <div style={{ display: "grid", gridTemplateColumns: "55px 55px 60px 40px 1fr 80px", gap: 6, padding: "4px 12px", marginBottom: 2 }}>
+            {["Departs", "Arrives", "Status", "Plat.", "Destination", ""].map((h, i) => <span key={i} style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: "#475569", textTransform: "uppercase" }}>{h}</span>)}
           </div>
 
           {trains.length === 0 ? <div style={{ textAlign: "center", padding: 20, color: "#64748b" }}><div style={{ fontSize: 22, marginBottom: 4 }}>{"\uD83D\uDE82"}</div><div style={{ fontSize: 12 }}>{isFuture ? "Live trains show today's schedule as a guide" : "No trains listed"}</div></div>
@@ -1151,12 +1169,14 @@ export default function App() {
               const sc = t.std || "\u2014"; const es = t.etd || "\u2014";
               const dly = es !== "On time" && es !== sc && es !== "\u2014" && es !== "Cancelled"; const cnc = es === "Cancelled";
               const act = activeTrain && t.std === activeTrain.std;
+              const arr = t.arrTime || "\u2014";
               return (
-                <div key={i} className="ts" onClick={() => setSelTrain(t.std === selTrain ? null : t.std)} style={{ display: "grid", gridTemplateColumns: "65px 72px 44px 1fr 100px", alignItems: "center", gap: 8, padding: "8px 12px", backgroundColor: act ? "rgba(99,102,241,.12)" : "transparent", border: act ? "1px solid rgba(99,102,241,.3)" : "1px solid transparent" }}>
+                <div key={i} className="ts" onClick={() => setSelTrain(t.std === selTrain ? null : t.std)} style={{ display: "grid", gridTemplateColumns: "55px 55px 60px 40px 1fr 80px", alignItems: "center", gap: 6, padding: "8px 12px", backgroundColor: act ? "rgba(99,102,241,.12)" : "transparent", border: act ? "1px solid rgba(99,102,241,.3)" : "1px solid transparent" }}>
                   <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 15, fontWeight: 700, color: "#e2e8f0" }}>{sc}</span>
-                  <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 13, fontWeight: 600, color: cnc ? "#ef4444" : dly ? "#f59e0b" : "#22c55e" }}>{cnc ? "CANC" : dly ? es : "On time"}</span>
-                  <span style={{ fontSize: 12, color: "#94a3b8", textAlign: "center" }}>{t.platform ? `P${t.platform}` : "\u2014"}</span>
-                  <span style={{ fontSize: 12, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.destination?.[0]?.locationName || "\u2014"}</span>
+                  <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 13, fontWeight: 600, color: "#818cf8" }}>{arr}</span>
+                  <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, fontWeight: 600, color: cnc ? "#ef4444" : dly ? "#f59e0b" : "#22c55e" }}>{cnc ? "CANC" : dly ? es : "On time"}</span>
+                  <span style={{ fontSize: 11, color: "#94a3b8", textAlign: "center" }}>{t.platform ? `P${t.platform}` : "\u2014"}</span>
+                  <span style={{ fontSize: 11, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.destination?.[0]?.locationName || "\u2014"}</span>
                   {act && <Badge s={cnc ? "danger" : dly ? "warning" : "good"}>{selTrain ? "Selected" : "Best"}</Badge>}
                 </div>
               );
@@ -1166,9 +1186,9 @@ export default function App() {
             <div style={{ marginTop: 10, padding: "10px 14px", borderRadius: 10, background: "linear-gradient(135deg,rgba(99,102,241,.1),rgba(16,185,129,.06))", border: "1px solid rgba(99,102,241,.2)" }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#818cf8" }}>
                 {dir === "to" ? (
-                  <>{"\uD83D\uDE82"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{activeTrain.std}</span> {stn.code} {"\u2192"} Leave home <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{fmt(J.leave)}</span> {"\u2192"} {"\uD83D\uDEB2"}{bHS}m {"\u2192"} train {"\u2192"} {"\uD83D\uDEB2"}{bSS}m {"\u2192"} {J.late ? <span style={{ color: "#fca5a5" }}>{"\u26A0\uFE0F"} LATE {fmt(J.arrSchool)}</span> : <span style={{ color: "#6ee7b7" }}>{"\u2705"} {fmt(J.arrSchool)} ({J.spare}m spare)</span>}</>
+                  <>{"\uD83D\uDE82"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{activeTrain.std}</span> {stn.code} {"\u2192"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#818cf8" }}>{J.arrStnStr || fmt(J.arrStn)}</span> {SCHOOL_STATION_CODE} ({J.trainMins}m) {"\u2192"} Leave home <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{fmt(J.leave)}</span> {"\u2192"} {"\uD83D\uDEB2"}{bHS}m {"\u2192"} train {"\u2192"} {"\uD83D\uDEB2"}{bSS}m {"\u2192"} {J.late ? <span style={{ color: "#fca5a5" }}>{"\u26A0\uFE0F"} LATE {fmt(J.arrSchool)}</span> : <span style={{ color: "#6ee7b7" }}>{"\u2705"} {fmt(J.arrSchool)} ({J.spare}m spare)</span>}</>
                 ) : (
-                  <>{"\uD83D\uDE82"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{activeTrain.std}</span> {SCHOOL_STATION_CODE} {"\u2192"} Leave college <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{fmt(J.leaveSchool)}</span> {"\u2192"} {"\uD83D\uDEB2"}{bSS2}m {"\u2192"} train {"\u2192"} {"\uD83D\uDEB2"}{bSH}m {"\u2192"} <span style={{ color: "#6ee7b7" }}>{"\uD83C\uDFE0"} {fmt(J.arrHome)}</span></>
+                  <>{"\uD83D\uDE82"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{activeTrain.std}</span> {SCHOOL_STATION_CODE} {"\u2192"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#818cf8" }}>{J.arrStnStr || fmt(J.arrStn)}</span> {stn.code} ({J.trainMins}m) {"\u2192"} Leave college <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{fmt(J.leaveSchool)}</span> {"\u2192"} {"\uD83D\uDEB2"}{bSS2}m {"\u2192"} train {"\u2192"} {"\uD83D\uDEB2"}{bSH}m {"\u2192"} <span style={{ color: "#6ee7b7" }}>{"\uD83C\uDFE0"} {fmt(J.arrHome)}</span></>
                 )}
               </div>
             </div>
