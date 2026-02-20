@@ -135,6 +135,83 @@ const MEALS = {
 const mealOfDay = (arr, date) => arr[Math.floor((date.getFullYear() * 366 + date.getMonth() * 31 + date.getDate())) % arr.length];
 
 // ═══════════════════════════════════════════════════════════════
+// GO LIFTING — gym slot detection & motivating quotes
+// ═══════════════════════════════════════════════════════════════
+const GYM_WORKOUT_MINS = 60;
+const GYM_CHANGE_MINS = 15;
+const EARLY_FINISH_H = 14; // last class before 2pm = early finish
+
+const LIFT_QUOTES = [
+  "Light weight baby! Time to get those gains.",
+  "The only bad workout is the one you didn't do.",
+  "Push harder than yesterday if you want a different tomorrow.",
+  "Your muscles don't know the difference between Monday and Friday. Get after it.",
+  "Be stronger than your excuses. Hit the gym.",
+  "Discipline is choosing between what you want now and what you want most.",
+  "Every rep counts. Make them all count.",
+  "You don't have to be great to start, but you have to start to be great.",
+  "The gym is calling. Don't let it go to voicemail.",
+  "Pain is temporary. Pride is forever. Go lift.",
+  "Time to build the body you've always wanted.",
+  "No excuses. No shortcuts. Just hard work.",
+  "Free period + gym = unstoppable combo.",
+  "While others rest, you build. Get in there.",
+];
+
+const fmtMins = (totalMins) => {
+  const h = Math.floor(totalMins / 60);
+  const m = totalMins % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+};
+
+const getGymSlots = (sessions) => {
+  const slots = [];
+  if (!sessions.length) return slots;
+
+  // Find gaps between sessions >= 60 min
+  for (let i = 0; i < sessions.length - 1; i++) {
+    const endStr = sessions[i].time.split("-")[1];
+    const startStr = sessions[i + 1].time.split("-")[0];
+    const endP = hm(endStr);
+    const startP = hm(startStr);
+    const gapMins = (startP.h * 60 + startP.m) - (endP.h * 60 + endP.m);
+    if (gapMins >= 60) {
+      const gymStart = endP.h * 60 + endP.m + GYM_CHANGE_MINS;
+      const gymEnd = startP.h * 60 + startP.m - GYM_CHANGE_MINS;
+      const gymDur = gymEnd - gymStart;
+      if (gymDur >= 45) {
+        slots.push({
+          type: "gap",
+          start: fmtMins(gymStart),
+          end: fmtMins(gymEnd),
+          mins: gymDur,
+          afterClass: sessions[i].subj,
+          beforeClass: sessions[i + 1].subj,
+        });
+      }
+    }
+  }
+
+  // Early finish: last class ends before 2pm
+  const lastEnd = sessions[sessions.length - 1].time.split("-")[1];
+  const lastP = hm(lastEnd);
+  const lastMins = lastP.h * 60 + lastP.m;
+  if (lastMins < EARLY_FINISH_H * 60) {
+    const gymStart = lastMins + GYM_CHANGE_MINS;
+    const gymEnd = gymStart + GYM_WORKOUT_MINS;
+    slots.push({
+      type: "earlyFinish",
+      start: fmtMins(gymStart),
+      end: fmtMins(gymEnd),
+      mins: GYM_WORKOUT_MINS,
+      doneBy: fmtMins(gymEnd + GYM_CHANGE_MINS),
+    });
+  }
+
+  return slots;
+};
+
+// ═══════════════════════════════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════════════════════════════
 const HUXLEY = "https://national-rail-api.davwheat.dev";
@@ -368,8 +445,15 @@ export default function App() {
   const peSession = tt.sessions.find(s => s.pe);
   const dayActivities = [peSession, showAfterSchool ? afterSchool : null].filter(Boolean);
 
-  // Effective end time (accounting for after-school if toggled on)
-  const effectiveEnd = (showAfterSchool && afterSchool) ? afterSchool.time.split("-")[1] : tt.end;
+  // Go Lifting — detect gym opportunities
+  const gymSlots = useMemo(() => hasClass ? getGymSlots(tt.sessions) : [], [planDate, hasClass]);
+  const earlyFinishGym = gymSlots.find(s => s.type === "earlyFinish");
+  const liftQuote = LIFT_QUOTES[Math.floor((planDate.getFullYear() * 366 + planDate.getMonth() * 31 + planDate.getDate())) % LIFT_QUOTES.length];
+
+  // Effective end time (accounting for gym after early finish, or after-school)
+  const effectiveEnd = (showAfterSchool && afterSchool)
+    ? afterSchool.time.split("-")[1]
+    : earlyFinishGym ? earlyFinishGym.doneBy : tt.end;
 
   // ═══════════════════════════════════════════════════════════
   // WEATHER + BIKE ADJUSTMENTS
@@ -573,14 +657,33 @@ export default function App() {
         .ts{cursor:pointer;transition:all .12s;border-radius:10px}.ts:hover{background:rgba(99,102,241,.08)!important}
         ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:rgba(99,102,241,.3);border-radius:3px}
         button{font-family:inherit}
+        @media(max-width:600px){
+          .main-grid{grid-template-columns:1fr!important}
+          .safety-grid{grid-template-columns:1fr!important}
+          .activities-grid{grid-template-columns:1fr!important}
+          .snack-grid{grid-template-columns:1fr 1fr!important}
+          .quick-links{grid-template-columns:1fr 1fr!important}
+          .checklist-grid{grid-template-columns:1fr 1fr!important}
+          .train-row{grid-template-columns:32px 48px 48px 52px 30px 1fr 60px!important;gap:3px!important;padding:6px 8px!important;font-size:10px!important}
+          .train-hdr{grid-template-columns:32px 48px 48px 52px 30px 1fr 60px!important;gap:3px!important;padding:4px 8px!important}
+          .journey-steps{gap:0!important}
+          .journey-step{min-width:46px!important;padding:4px 2px!important}
+          .journey-trans{min-width:36px!important}
+        }
+        @media(max-width:430px){
+          .app-wrap{padding:12px 10px 32px!important;padding-top:max(12px,env(safe-area-inset-top))!important;padding-bottom:max(32px,env(safe-area-inset-bottom))!important;padding-left:max(10px,env(safe-area-inset-left))!important;padding-right:max(10px,env(safe-area-inset-right))!important}
+          .header-time{font-size:34px!important}
+          .countdown-time{font-size:22px!important}
+          .future-leave{font-size:20px!important}
+        }
       `}</style>
 
-      <div style={{ maxWidth: 920, margin: "0 auto", padding: "16px 16px 40px" }}>
+      <div className="app-wrap" style={{ maxWidth: 920, margin: "0 auto", padding: "16px 16px 40px" }}>
 
         {/* HEADER */}
         <div style={{ textAlign: "center", marginBottom: 12, animation: "slideIn .4s" }}>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 4, color: "#818cf8", textTransform: "uppercase" }}>{"\uD83D\uDEB2"} Tom's Travel Companion {"\uD83D\uDE82"}</div>
-          <div style={{ fontSize: 42, fontWeight: 900, letterSpacing: -1, fontFamily: "'JetBrains Mono',monospace", background: "linear-gradient(135deg,#e2e8f0,#818cf8,#6ee7b7)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>{fmt(now)}</div>
+          <div className="header-time" style={{ fontSize: 42, fontWeight: 900, letterSpacing: -1, fontFamily: "'JetBrains Mono',monospace", background: "linear-gradient(135deg,#e2e8f0,#818cf8,#6ee7b7)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>{fmt(now)}</div>
           <div style={{ fontSize: 12, color: "#64748b" }}>{fmtLong(now)}</div>
         </div>
 
@@ -655,7 +758,7 @@ export default function App() {
             <div style={{ fontSize: 12, fontWeight: 600, color: "#94a3b8", marginBottom: 4 }}>
               {dir === "to" ? (countdown <= 0 ? "\u26A0\uFE0F YOU SHOULD HAVE LEFT!" : countdown <= 5 ? "\uD83C\uDFC3 LEAVE NOW!" : countdown <= 15 ? "\uD83D\uDD14 LEAVING SOON" : "\u2705 YOU HAVE TIME") : "\uD83C\uDFE0 HEADING HOME"}
             </div>
-            <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: countdown <= 0 ? "#fca5a5" : countdown <= 15 ? "#fcd34d" : "#6ee7b7" }}>
+            <div className="countdown-time" style={{ fontSize: 28, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: countdown <= 0 ? "#fca5a5" : countdown <= 15 ? "#fcd34d" : "#6ee7b7" }}>
               {countdown <= 0 ? `${Math.abs(countdown)} min overdue` : `${countdown} min until you leave`}
             </div>
             <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>
@@ -673,10 +776,11 @@ export default function App() {
             <div style={{ fontSize: 12, fontWeight: 700, color: "#a78bfa", marginBottom: 6 }}>
               {"\uD83D\uDCC5"} {fmtLong(planDate)} {"\u2014"} {tt.sessions.length} lesson{tt.sessions.length > 1 ? "s" : ""} ({tt.start} {"\u2013"} {tt.end})
               {showAfterSchool && afterSchool && <span style={{ color: "#6ee7b7" }}> + {afterSchool.name} until {afterSchool.time.split("-")[1]}</span>}
+              {gymSlots.length > 0 && <span style={{ color: "#fcd34d" }}> {"\uD83C\uDFCB\uFE0F"} {gymSlots.length} gym slot{gymSlots.length > 1 ? "s" : ""}</span>}
             </div>
             {dir === "to" ? (
               <>
-                <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: "#c7d2fe" }}>Leave home at {fmt(J.leave)}</div>
+                <div className="future-leave" style={{ fontSize: 26, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: "#c7d2fe" }}>Leave home at {fmt(J.leave)}</div>
                 <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 6, lineHeight: 1.6 }}>
                   {"\uD83D\uDEB2"} Bike {bHS}min to {activeStn.name} {"\u2192"} {"\uD83D\uDE82"} {J.tStr} train ({J.trainMins}min) {"\u2192"} arr {J.arrStnStr || fmt(J.arrStn)} {"\u2192"} {"\uD83D\uDEB2"} Bike {bSS}min to college
                 </div>
@@ -685,9 +789,11 @@ export default function App() {
               </>
             ) : (
               <>
-                <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: "#c7d2fe" }}>Home by ~{fmt(J.arrHome)}</div>
+                <div className="future-leave" style={{ fontSize: 26, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: "#c7d2fe" }}>Home by ~{fmt(J.arrHome)}</div>
                 <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 6, lineHeight: 1.6 }}>
-                  {"\uD83C\uDF93"} Finishes {finishStr} {"\u2192"} {"\uD83D\uDEB2"} {bSS}min to station {"\u2192"} {"\uD83D\uDE82"} {J.tStr} train ({J.trainMins}min) {"\u2192"} arr {J.arrStnStr || fmt(J.arrStn)} {"\u2192"} {"\uD83D\uDEB2"} {bSH}min home
+                  {"\uD83C\uDF93"} Finishes {tt.end}
+                  {earlyFinishGym && <> {"\u2192"} {"\uD83C\uDFCB\uFE0F"} <span style={{ color: "#fcd34d" }}>Go Lifting {earlyFinishGym.start}-{earlyFinishGym.end}</span></>}
+                  {" \u2192 "}{"\uD83D\uDEB2"} {bSS}min to station {"\u2192"} {"\uD83D\uDE82"} {J.tStr} train ({J.trainMins}min) {"\u2192"} arr {J.arrStnStr || fmt(J.arrStn)} {"\u2192"} {"\uD83D\uDEB2"} {bSH}min home
                 </div>
               </>
             )}
@@ -703,7 +809,7 @@ export default function App() {
                 <Pulse /> View Live &rarr;
               </a>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 0, flexWrap: "wrap", justifyContent: "center" }}>
+            <div className="journey-steps" style={{ display: "flex", alignItems: "center", gap: 0, flexWrap: "wrap", justifyContent: "center" }}>
               {(dir === "to" ? [
                 { icon: "\uD83C\uDFE0", lbl: "Home", time: fmt(J.leave), sub: HOME_POSTCODE },
                 { icon: "\uD83D\uDEB2", lbl: `${bHS}m`, sub: `${activeStn.bikeMi}mi`, tr: true },
@@ -713,7 +819,10 @@ export default function App() {
                 { icon: "\uD83D\uDEB2", lbl: `${bSS}m`, sub: `${BIKE_STN_SCHOOL.mi}mi`, tr: true },
                 { icon: "\uD83C\uDFEB", lbl: "College", time: fmt(J.arrSchool), sub: J.late ? "LATE!" : "\u2713", late: J.late },
               ] : [
-                { icon: "\uD83C\uDFEB", lbl: "College", time: finishStr, sub: "Finish" },
+                { icon: "\uD83C\uDFEB", lbl: "College", time: tt.end, sub: earlyFinishGym ? "Done" : "Finish" },
+                ...(earlyFinishGym ? [
+                  { icon: "\uD83C\uDFCB\uFE0F", lbl: `Gym`, time: `${earlyFinishGym.mins}m`, sub: "Lift!", tr: true },
+                ] : []),
                 { icon: "\uD83D\uDEB2", lbl: `${bSS}m`, sub: `${BIKE_STN_SCHOOL.mi}mi`, tr: true },
                 { icon: "\uD83D\uDE89", lbl: SCHOOL_STATION, time: J.tStr, sub: SCHOOL_STATION_CODE },
                 { icon: "\uD83D\uDE82", lbl: `${J.trainMins}m`, sub: J.arrStnStr ? "Live" : "Est.", tr: true },
@@ -722,7 +831,7 @@ export default function App() {
                 { icon: "\uD83C\uDFE0", lbl: "Home", time: fmt(J.arrHome), sub: HOME_POSTCODE },
               ]).map((s, i, a) => (
                 <div key={i} style={{ display: "flex", alignItems: "center" }}>
-                  <div style={{ textAlign: "center", minWidth: s.tr ? 50 : 64, padding: "5px 3px", borderRadius: 10, backgroundColor: s.tr ? "transparent" : s.late ? "rgba(239,68,68,.1)" : "rgba(99,102,241,.08)" }}>
+                  <div className={s.tr ? "journey-trans" : "journey-step"} style={{ textAlign: "center", minWidth: s.tr ? 50 : 64, padding: "5px 3px", borderRadius: 10, backgroundColor: s.tr ? "transparent" : s.late ? "rgba(239,68,68,.1)" : "rgba(99,102,241,.08)" }}>
                     <div style={{ fontSize: s.tr ? 13 : 18 }}>{s.icon}</div>
                     <div style={{ fontSize: 9, fontWeight: 700, color: "#e2e8f0", marginTop: 1 }}>{s.lbl}</div>
                     {s.time && <div style={{ fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace", color: s.late ? "#fca5a5" : "#818cf8" }}>{s.time}</div>}
@@ -766,7 +875,7 @@ export default function App() {
         )}
 
         {/* MAIN GRID: TIMETABLE / WEATHER / CLOTHING */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+        <div className="main-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
           {/* TIMETABLE */}
           <Card style={{ animation: "slideIn .6s" }}>
             <Lbl icon={"\uD83D\uDCDA"}>{isToday ? "Today's Lessons" : `${tt.label}'s Lessons`}</Lbl>
@@ -789,7 +898,34 @@ export default function App() {
                 <div style={{ fontSize: 10, color: "#64748b" }}>{afterSchool.location}</div>
               </div>
             )}
-            {hasClass && <div style={{ marginTop: 6, fontSize: 10, color: "#64748b", textAlign: "center" }}>College: <strong style={{ color: "#e2e8f0" }}>{tt.start}</strong> {"\u2013"} <strong style={{ color: "#e2e8f0" }}>{tt.end}</strong>{showAfterSchool && afterSchool && <> + club until <strong style={{ color: "#fcd34d" }}>{afterSchool.time.split("-")[1]}</strong></>}</div>}
+            {/* GO LIFTING — gym slots */}
+            {gymSlots.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: "#f59e0b", marginBottom: 4 }}>{"\uD83D\uDCAA"} GO LIFTING</div>
+                {gymSlots.map((slot, i) => (
+                  <div key={i} style={{ padding: "8px 10px", borderRadius: 8, marginBottom: 4, background: "linear-gradient(135deg,rgba(245,158,11,.1),rgba(239,68,68,.06))", border: "1px solid rgba(245,158,11,.2)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace", color: "#fcd34d" }}>{slot.start} - {slot.end}</span>
+                      <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, backgroundColor: "rgba(245,158,11,.15)", color: "#fcd34d" }}>{slot.mins}min</span>
+                    </div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#e2e8f0", marginTop: 2 }}>{"\uD83C\uDFCB\uFE0F"} Go Lifting</div>
+                    <div style={{ fontSize: 10, color: "#94a3b8" }}>
+                      {slot.type === "gap"
+                        ? <>Free period {"\u2014"} between {slot.afterClass.split(" ").slice(-1)} & {slot.beforeClass.split(" ").slice(-1)}</>
+                        : <>Early finish {"\u2014"} hit the gym before heading home</>}
+                    </div>
+                  </div>
+                ))}
+                <div style={{ padding: "6px 10px", borderRadius: 8, backgroundColor: "rgba(245,158,11,.05)", border: "1px solid rgba(245,158,11,.08)", fontSize: 10, color: "#fcd34d", fontStyle: "italic" }}>
+                  {"\uD83D\uDD25"} {liftQuote}
+                </div>
+              </div>
+            )}
+            {hasClass && <div style={{ marginTop: 6, fontSize: 10, color: "#64748b", textAlign: "center" }}>
+              College: <strong style={{ color: "#e2e8f0" }}>{tt.start}</strong> {"\u2013"} <strong style={{ color: "#e2e8f0" }}>{tt.end}</strong>
+              {showAfterSchool && afterSchool && <> + club until <strong style={{ color: "#fcd34d" }}>{afterSchool.time.split("-")[1]}</strong></>}
+              {earlyFinishGym && <> {"\u2192"} <strong style={{ color: "#fcd34d" }}>{"\uD83C\uDFCB\uFE0F"} Gym until {earlyFinishGym.doneBy}</strong></>}
+            </div>}
           </Card>
 
           {/* WEATHER */}
@@ -830,7 +966,7 @@ export default function App() {
         {hasClass && inTerm && dayActivities.length > 0 && (
           <Card style={{ marginTop: 14, animation: "slideIn .72s" }} glow="rgba(16,185,129,.08)">
             <Lbl icon={"\u26BD"}>{isToday ? "Today's Activities" : `${tt.label}'s Activities`}</Lbl>
-            <div style={{ display: "grid", gridTemplateColumns: dayActivities.length > 1 ? "1fr 1fr" : "1fr", gap: 10 }}>
+            <div className="activities-grid" style={{ display: "grid", gridTemplateColumns: dayActivities.length > 1 ? "1fr 1fr" : "1fr", gap: 10 }}>
               {dayActivities.map((act, i) => {
                 const isAfter = !act.pe;
                 const aName = act.activity || act.name;
@@ -855,7 +991,7 @@ export default function App() {
 
         {/* SAFETY CARDS — Activity + Travel */}
         {hasClass && inTerm && (showActivitySafety || showTravelSafety) && (
-          <div style={{ display: "grid", gridTemplateColumns: showActivitySafety && showTravelSafety ? "1fr 1fr" : "1fr", gap: 14, marginTop: 14 }}>
+          <div className="safety-grid" style={{ display: "grid", gridTemplateColumns: showActivitySafety && showTravelSafety ? "1fr 1fr" : "1fr", gap: 14, marginTop: 14 }}>
             {/* Activity Safety */}
             {showActivitySafety && (aSafety.tips.length > 0 || asAfterSafety.tips.length > 0) && (
               <Card style={{ animation: "slideIn .75s" }} glow={aSafety.warnings.length > 0 || asAfterSafety.warnings.length > 0 ? "rgba(245,158,11,.08)" : undefined}>
@@ -980,7 +1116,7 @@ export default function App() {
             {/* High-protein snacks */}
             <div>
               <div style={{ fontSize: 10, fontWeight: 700, color: "#c084fc", letterSpacing: 1, marginBottom: 6 }}>{"\uD83E\uDD5C"} HIGH-PROTEIN SNACK IDEAS</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6 }}>
+              <div className="snack-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6 }}>
                 {MEALS.snacks.map((s, i) => (
                   <div key={i} style={{ textAlign: "center", padding: "8px 4px", borderRadius: 8, backgroundColor: "rgba(168,85,247,.05)", border: "1px solid rgba(168,85,247,.08)" }}>
                     <div style={{ fontSize: 16 }}>{s.icon}</div>
@@ -1038,8 +1174,8 @@ export default function App() {
           {alerts.length > 0 && <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 10, backgroundColor: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)" }}>{alerts.map((a, i) => <div key={i} style={{ fontSize: 11, color: "#fca5a5" }}>{typeof a === "string" ? a.replace(/<[^>]*>/g, "") : ""}</div>)}</div>}
 
           {/* Train list header */}
-          <div style={{ display: "grid", gridTemplateColumns: "40px 55px 55px 60px 36px 1fr 80px", gap: 6, padding: "4px 12px", marginBottom: 2 }}>
-            {["Stn", "Departs", "Arrives", "Status", "Plat.", "Destination", ""].map((h, i) => <span key={i} style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: "#475569", textTransform: "uppercase" }}>{h}</span>)}
+          <div className="train-hdr" style={{ display: "grid", gridTemplateColumns: "40px 55px 55px 60px 36px 1fr 80px", gap: 6, padding: "4px 12px", marginBottom: 2 }}>
+            {["Stn", "Dep", "Arr", "Status", "Plat", "Destination", ""].map((h, i) => <span key={i} style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: "#475569", textTransform: "uppercase" }}>{h}</span>)}
           </div>
 
           {allTrains.length === 0 ? <div style={{ textAlign: "center", padding: 20, color: "#64748b" }}><div style={{ fontSize: 22, marginBottom: 4 }}>{"\uD83D\uDE82"}</div><div style={{ fontSize: 12 }}>{isFuture ? "Live trains show today's schedule as a guide" : "No trains listed"}</div></div>
@@ -1049,7 +1185,7 @@ export default function App() {
               const act = activeTrain && trainKey(t) === trainKey(activeTrain);
               const arr = t.arrTime || "\u2014";
               return (
-                <div key={trainKey(t)} className="ts" onClick={() => setSelTrain(trainKey(t) === selTrain ? null : trainKey(t))} style={{ display: "grid", gridTemplateColumns: "40px 55px 55px 60px 36px 1fr 80px", alignItems: "center", gap: 6, padding: "8px 12px", backgroundColor: act ? "rgba(99,102,241,.12)" : "transparent", border: act ? "1px solid rgba(99,102,241,.3)" : "1px solid transparent" }}>
+                <div key={trainKey(t)} className="ts train-row" onClick={() => setSelTrain(trainKey(t) === selTrain ? null : trainKey(t))} style={{ display: "grid", gridTemplateColumns: "40px 55px 55px 60px 36px 1fr 80px", alignItems: "center", gap: 6, padding: "8px 12px", backgroundColor: act ? "rgba(99,102,241,.12)" : "transparent", border: act ? "1px solid rgba(99,102,241,.3)" : "1px solid transparent" }}>
                   <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 4px", borderRadius: 4, textAlign: "center", backgroundColor: t.stnKey === "GOD" ? "rgba(16,185,129,.15)" : "rgba(99,102,241,.15)", color: t.stnKey === "GOD" ? "#6ee7b7" : "#818cf8" }}>{t.stnKey}</span>
                   <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 15, fontWeight: 700, color: "#e2e8f0" }}>{sc}</span>
                   <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 13, fontWeight: 600, color: "#818cf8" }}>{arr}</span>
@@ -1075,7 +1211,7 @@ export default function App() {
         </Card>
 
         {/* QUICK LINKS */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginTop: 14 }}>
+        <div className="quick-links" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginTop: 14 }}>
           {[
             { e: "\uD83C\uDFAB", l: "Book Train", u: trainlineUrl },
             { e: "\uD83D\uDE82", l: "Live Trains", u: liveTrainsUrl },
@@ -1091,7 +1227,7 @@ export default function App() {
         {/* CHECKLIST */}
         <Card style={{ marginTop: 14 }}>
           <Lbl icon={"\uD83D\uDCCB"}>Tom's Checklist</Lbl>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+          <div className="checklist-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
             {[
               { t: "Bike lights charged", s: pDark },
               { t: "Waterproof packed", s: pRain },
