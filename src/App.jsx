@@ -27,6 +27,16 @@ const HOME_STATIONS = {
 };
 const DEFAULT_HOME_STATION = "GOD";
 
+// ── RUBY'S (SANDHURST, BERKSHIRE) ─────────────────────
+const RUBY_NAME = "Ruby";
+const RUBY_POSTCODE = "GU47 9AG";
+const RUBY_STATION = "Sandhurst";
+const RUBY_STATION_CODE = "SND";
+const RUBY_LAT = 51.348;
+const RUBY_LON = -0.801;
+const BIKE_STN_RUBY = { mi: 1.2, mins: 8 }; // Sandhurst station → Green Lane
+const SUNDAY_LEAVE_RUBY = "19:00"; // Tom aims to leave Ruby's ~7pm Sunday
+
 // ── ROUTE DISTANCES ──────────────────────────────────────────
 const BIKE_STN_SCHOOL = { mi: 1.0, mins: 6 };  // Woking station → Woking College
 const TRAIN_MINS = 20;                           // Train journey time (via Guildford)
@@ -390,6 +400,7 @@ export default function App() {
   const [wx, setWx] = useState(null);
   const [trainsGOD, setTrainsGOD] = useState({ to: [], from: [] });
   const [trainsFNC, setTrainsFNC] = useState({ to: [], from: [] });
+  const [trainsSND, setTrainsSND] = useState({ toRuby: [], fromRuby: [] });
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [lastRef, setLastRef] = useState(null);
@@ -416,9 +427,12 @@ export default function App() {
       setUserLoc({ lat: latitude, lon: longitude });
       const distHome = haversine(latitude, longitude, HOME_LAT, HOME_LON);
       const distCollege = haversine(latitude, longitude, COLLEGE_LAT, COLLEGE_LON);
+      const distRuby = haversine(latitude, longitude, RUBY_LAT, RUBY_LON);
       if (distHome < 1) setLocLabel("At home");
       else if (distCollege < 1) setLocLabel("At college");
-      else if (distHome < distCollege) setLocLabel("Near home");
+      else if (distRuby < 1) setLocLabel("At Ruby's");
+      else if (distHome < distCollege && distHome < distRuby) setLocLabel("Near home");
+      else if (distRuby < distCollege) setLocLabel("Near Ruby's");
       else setLocLabel("Near college");
     };
     navigator.geolocation.getCurrentPosition(update, () => {}, { enableHighAccuracy: false });
@@ -495,6 +509,40 @@ export default function App() {
     ? afterSchool.time.split("-")[1]
     : earlyFinishGym ? earlyFinishGym.doneBy : tt.end;
 
+  // Weekend at Ruby's
+  const isFriday = planDate.getDay() === 5;
+  const isSaturday = planDate.getDay() === 6;
+  const isSunday = planDate.getDay() === 0;
+  const isWeekendRuby = isFriday || isSaturday || isSunday;
+
+  const rubyToTrain = useMemo(() => {
+    if (!isFriday || !hasClass) return null;
+    // After college finishes (with gym if applicable), find first train WOK → SND
+    const collegeEndTime = makeT(planDate, hm(effectiveEnd).h, hm(effectiveEnd).m);
+    const readyAtStation = addM(collegeEndTime, bSS + BUF);
+    for (const t of (trainsSND.toRuby || [])) {
+      if (t.etd === "Cancelled") continue;
+      const dep = parseTT(t.std, planDate);
+      if (!dep) continue;
+      if (dep >= readyAtStation) return t;
+    }
+    return (trainsSND.toRuby || []).find(t => t.etd !== "Cancelled") || null;
+  }, [isFriday, hasClass, effectiveEnd, trainsSND, planDate, bSS]);
+
+  const rubyFromTrain = useMemo(() => {
+    if (!isSunday) return null;
+    // Leave Ruby's at ~7pm, bike 8min to station, find first train after
+    const leaveTime = makeT(planDate, 19, 0);
+    const atStation = addM(leaveTime, BIKE_STN_RUBY.mins + BUF);
+    for (const t of (trainsSND.fromRuby || [])) {
+      if (t.etd === "Cancelled") continue;
+      const dep = parseTT(t.std, planDate);
+      if (!dep) continue;
+      if (dep >= atStation) return t;
+    }
+    return (trainsSND.fromRuby || []).find(t => t.etd !== "Cancelled") || null;
+  }, [isSunday, trainsSND, planDate]);
+
   // ═══════════════════════════════════════════════════════════
   // WEATHER + BIKE ADJUSTMENTS
   // ═══════════════════════════════════════════════════════════
@@ -529,6 +577,19 @@ export default function App() {
       setTrainsFNC({ to: addArrival(fncToD.trainServices, SCHOOL_STATION_CODE), from: addArrival(fncFromD.trainServices, "FNC") });
       setAlerts(godToD.nrccMessages ? godToD.nrccMessages.map(m => typeof m === "string" ? m : m.value || "") : []);
       setLastRef(new Date());
+
+      // Fetch Sandhurst (Ruby) trains
+      try {
+        const [wokSnd, sndGld] = await Promise.all([
+          fetch(`${HUXLEY}/departures/${SCHOOL_STATION_CODE}/to/${RUBY_STATION_CODE}/10?expand=true`),
+          fetch(`${HUXLEY}/departures/${RUBY_STATION_CODE}/to/GLD/10?expand=true`),
+        ]);
+        const [wokSndD, sndGldD] = await Promise.all([wokSnd.json(), sndGld.json()]);
+        setTrainsSND({
+          toRuby: addArrival(wokSndD.trainServices, RUBY_STATION_CODE),
+          fromRuby: addArrival(sndGldD.trainServices, "GLD"),
+        });
+      } catch (e) { console.error("Sandhurst trains:", e); }
     } catch (e) { console.error(e); }
   }, []);
 
@@ -672,6 +733,18 @@ export default function App() {
     const dt = planDate.toISOString().split("T")[0] + "T" + timeStr.slice(0,5) + ":00";
     return `https://www.thetrainline.com/book/results?journeySearchType=single&origin=${encodeURIComponent(depName)}&destination=${encodeURIComponent(arrName)}&outwardDate=${encodeURIComponent(dt)}&outwardDateType=departAfter&passengers%5B%5D=2008-01-01%7C16-25-railcard`;
   }, [dir, activeStn, planDate, activeTrain, J]);
+
+  const rubyTrainlineUrl = useMemo(() => {
+    if (isFriday && rubyToTrain) {
+      const dt = planDate.toISOString().split("T")[0] + "T" + rubyToTrain.std + ":00";
+      return `https://www.thetrainline.com/book/results?journeySearchType=single&origin=${encodeURIComponent(SCHOOL_STATION)}&destination=${encodeURIComponent(RUBY_STATION)}&outwardDate=${encodeURIComponent(dt)}&outwardDateType=departAfter&passengers%5B%5D=2008-01-01%7C16-25-railcard`;
+    }
+    if (isSunday && rubyFromTrain) {
+      const dt = planDate.toISOString().split("T")[0] + "T" + rubyFromTrain.std + ":00";
+      return `https://www.thetrainline.com/book/results?journeySearchType=single&origin=${encodeURIComponent(RUBY_STATION)}&destination=${encodeURIComponent("Godalming")}&outwardDate=${encodeURIComponent(dt)}&outwardDateType=departAfter&passengers%5B%5D=2008-01-01%7C16-25-railcard`;
+    }
+    return null;
+  }, [isFriday, isSunday, rubyToTrain, rubyFromTrain, planDate]);
 
   // National Rail live departures URL
   const liveTrainsUrl = useMemo(() => {
@@ -945,6 +1018,88 @@ export default function App() {
               <span style={{ fontSize: 12, fontWeight: 700, color: "#818cf8" }}>Live Trains</span>
             </a>
           </div>
+        )}
+
+        {/* WEEKEND AT RUBY'S */}
+        {isWeekendRuby && inTerm && (
+          <Card style={{ marginBottom: 14, animation: "slideIn .58s" }} glow="rgba(236,72,153,.1)">
+            <Lbl icon={"\u2764\uFE0F"}>Weekend at Ruby's — {RUBY_STATION}</Lbl>
+
+            {isFriday && hasClass && (
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#f472b6", letterSpacing: 1, marginBottom: 6 }}>FRIDAY → ONWARD TO RUBY'S</div>
+                <div style={{ padding: "10px 14px", borderRadius: 10, backgroundColor: "rgba(236,72,153,.06)", border: "1px solid rgba(236,72,153,.15)" }}>
+                  <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.8 }}>
+                    {"\uD83C\uDFEB"} College finishes <strong style={{ color: "#e2e8f0" }}>{tt.end}</strong>
+                    {earlyFinishGym && <> → {"\uD83C\uDFCB\uFE0F"} <span style={{ color: "#fcd34d" }}>Gym until {earlyFinishGym.doneBy}</span></>}
+                    {" → "}{"\uD83D\uDEB2"} Bike {bSS}min to Woking station
+                    {" → "}{"\uD83D\uDE82"} {rubyToTrain ? <><strong style={{ color: "#f472b6" }}>{rubyToTrain.std}</strong> train to {RUBY_STATION}{rubyToTrain.arrTime && <> (arr <strong style={{ color: "#e2e8f0" }}>{rubyToTrain.arrTime}</strong>)</>}</> : <span style={{ color: "#94a3b8" }}>train to {RUBY_STATION} (~35min)</span>}
+                    {" → "}{"\uD83D\uDEB2"} Bike {BIKE_STN_RUBY.mins}min to Green Lane
+                  </div>
+                  {rubyToTrain && (
+                    <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 8px", borderRadius: 4, backgroundColor: "rgba(236,72,153,.15)", color: "#f472b6" }}>
+                        {rubyToTrain.etd === "On time" ? "ON TIME" : rubyToTrain.etd === "Cancelled" ? "CANCELLED" : rubyToTrain.etd}
+                      </span>
+                      {rubyToTrain.platform && <span style={{ fontSize: 10, color: "#94a3b8" }}>Platform {rubyToTrain.platform}</span>}
+                    </div>
+                  )}
+                </div>
+                {rubyTrainlineUrl && (
+                  <a href={rubyTrainlineUrl} target="_blank" rel="noopener noreferrer" style={{
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                    marginTop: 8, padding: "8px 14px", borderRadius: 10, textDecoration: "none",
+                    backgroundColor: "rgba(236,72,153,.08)", border: "1px solid rgba(236,72,153,.15)",
+                  }}>
+                    <span style={{ fontSize: 14 }}>{"\uD83C\uDFAB"}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#f472b6" }}>Book Woking → Sandhurst on Trainline</span>
+                  </a>
+                )}
+              </div>
+            )}
+
+            {isSaturday && (
+              <div style={{ textAlign: "center", padding: "14px 10px" }}>
+                <div style={{ fontSize: 28, marginBottom: 6 }}>{"\uD83D\uDE0D"}</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#f472b6" }}>Enjoying the weekend at Ruby's</div>
+                <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>{RUBY_POSTCODE} · {RUBY_STATION}, Berkshire</div>
+                <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>Head home tomorrow evening ~{SUNDAY_LEAVE_RUBY}</div>
+              </div>
+            )}
+
+            {isSunday && (
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#f472b6", letterSpacing: 1, marginBottom: 6 }}>SUNDAY → HEADING HOME</div>
+                <div style={{ padding: "10px 14px", borderRadius: 10, backgroundColor: "rgba(236,72,153,.06)", border: "1px solid rgba(236,72,153,.15)" }}>
+                  <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.8 }}>
+                    {"\uD83C\uDFE0"} Leave Ruby's <strong style={{ color: "#e2e8f0" }}>~{SUNDAY_LEAVE_RUBY}</strong>
+                    {" → "}{"\uD83D\uDEB2"} Bike {BIKE_STN_RUBY.mins}min to {RUBY_STATION} station
+                    {" → "}{"\uD83D\uDE82"} {rubyFromTrain ? <><strong style={{ color: "#f472b6" }}>{rubyFromTrain.std}</strong> train to Guildford{rubyFromTrain.arrTime && <> (arr <strong style={{ color: "#e2e8f0" }}>{rubyFromTrain.arrTime}</strong>)</>}</> : <span style={{ color: "#94a3b8" }}>train to Guildford (~25min)</span>}
+                    {" → "}{"\uD83D\uDD04"} Change at Guildford for Godalming/Farncombe
+                    {" → "}{"\uD83D\uDEB2"} Bike home
+                  </div>
+                  {rubyFromTrain && (
+                    <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 8px", borderRadius: 4, backgroundColor: "rgba(236,72,153,.15)", color: "#f472b6" }}>
+                        {rubyFromTrain.etd === "On time" ? "ON TIME" : rubyFromTrain.etd === "Cancelled" ? "CANCELLED" : rubyFromTrain.etd}
+                      </span>
+                      {rubyFromTrain.platform && <span style={{ fontSize: 10, color: "#94a3b8" }}>Platform {rubyFromTrain.platform}</span>}
+                    </div>
+                  )}
+                </div>
+                {rubyTrainlineUrl && (
+                  <a href={rubyTrainlineUrl} target="_blank" rel="noopener noreferrer" style={{
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                    marginTop: 8, padding: "8px 14px", borderRadius: 10, textDecoration: "none",
+                    backgroundColor: "rgba(236,72,153,.08)", border: "1px solid rgba(236,72,153,.15)",
+                  }}>
+                    <span style={{ fontSize: 14 }}>{"\uD83C\uDFAB"}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#f472b6" }}>Book Sandhurst → Godalming on Trainline</span>
+                  </a>
+                )}
+              </div>
+            )}
+          </Card>
         )}
 
         {/* MAIN GRID: TIMETABLE / WEATHER / CLOTHING */}
@@ -1320,7 +1475,7 @@ export default function App() {
 
         {/* FOOTER */}
         <div style={{ textAlign: "center", marginTop: 16, fontSize: 10, color: "#475569" }}>
-          <div>{HOME_POSTCODE} {"\uD83D\uDEB2"} Godalming / Farncombe {"\uD83D\uDE82"} {SCHOOL_STATION} {"\uD83D\uDEB2"} {SCHOOL_NAME}</div>
+          <div>{HOME_POSTCODE} {"\uD83D\uDEB2"} Godalming / Farncombe {"\uD83D\uDE82"} {SCHOOL_STATION} {"\uD83D\uDE82"} {RUBY_STATION} {"\u2764\uFE0F"} {RUBY_POSTCODE}</div>
           <div style={{ marginTop: 3 }}>National Rail Darwin {"\u00B7"} Open-Meteo {"\u00B7"} Term: {TERM_START.toLocaleDateString("en-GB", { day: "numeric", month: "short" })} {"\u2013"} {TERM_END.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</div>
           <div style={{ marginTop: 6 }}><button onClick={() => { fetchTrains(); fetchWx(); }} style={{ padding: "5px 14px", borderRadius: 8, border: "1px solid rgba(99,102,241,.3)", backgroundColor: "rgba(99,102,241,.1)", color: "#818cf8", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>{"\uD83D\uDD04"} Refresh</button></div>
         </div>
