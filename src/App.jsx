@@ -509,40 +509,6 @@ export default function App() {
     ? afterSchool.time.split("-")[1]
     : earlyFinishGym ? earlyFinishGym.doneBy : tt.end;
 
-  // Weekend at Ruby's
-  const isFriday = planDate.getDay() === 5;
-  const isSaturday = planDate.getDay() === 6;
-  const isSunday = planDate.getDay() === 0;
-  const isWeekendRuby = isFriday || isSaturday || isSunday;
-
-  const rubyToTrain = useMemo(() => {
-    if (!isFriday || !hasClass) return null;
-    // After college finishes (with gym if applicable), find first train WOK → SND
-    const collegeEndTime = makeT(planDate, hm(effectiveEnd).h, hm(effectiveEnd).m);
-    const readyAtStation = addM(collegeEndTime, bSS + BUF);
-    for (const t of (trainsSND.toRuby || [])) {
-      if (t.etd === "Cancelled") continue;
-      const dep = parseTT(t.std, planDate);
-      if (!dep) continue;
-      if (dep >= readyAtStation) return t;
-    }
-    return (trainsSND.toRuby || []).find(t => t.etd !== "Cancelled") || null;
-  }, [isFriday, hasClass, effectiveEnd, trainsSND, planDate, bSS]);
-
-  const rubyFromTrain = useMemo(() => {
-    if (!isSunday) return null;
-    // Leave Ruby's at ~7pm, bike 8min to station, find first train after
-    const leaveTime = makeT(planDate, 19, 0);
-    const atStation = addM(leaveTime, BIKE_STN_RUBY.mins + BUF);
-    for (const t of (trainsSND.fromRuby || [])) {
-      if (t.etd === "Cancelled") continue;
-      const dep = parseTT(t.std, planDate);
-      if (!dep) continue;
-      if (dep >= atStation) return t;
-    }
-    return (trainsSND.fromRuby || []).find(t => t.etd !== "Cancelled") || null;
-  }, [isSunday, trainsSND, planDate]);
-
   // ═══════════════════════════════════════════════════════════
   // WEATHER + BIKE ADJUSTMENTS
   // ═══════════════════════════════════════════════════════════
@@ -624,6 +590,40 @@ export default function App() {
   const tSafety = travelSafety(pTemp, pRain, curWind, pDark, pWxCode);
   const aSafety = peSession ? actSafety(peSession.activity, peSession.outdoor, pTemp, pRain, curWind, pWxCode) : { tips: [], warnings: [] };
   const asAfterSafety = (showAfterSchool && afterSchool) ? actSafety(afterSchool.activity, afterSchool.outdoor, pTemp, pRain, curWind, pWxCode) : { tips: [], warnings: [] };
+
+  // Weekend at Ruby's (must be after bSS is defined)
+  const isFriday = planDate.getDay() === 5;
+  const isSaturday = planDate.getDay() === 6;
+  const isSunday = planDate.getDay() === 0;
+  const isWeekendRuby = isFriday || isSaturday || isSunday;
+
+  const rubyToTrain = useMemo(() => {
+    if (!isFriday || !hasClass) return null;
+    // After college finishes (with gym if applicable), find first train WOK → SND
+    const collegeEndTime = makeT(planDate, hm(effectiveEnd).h, hm(effectiveEnd).m);
+    const readyAtStation = addM(collegeEndTime, bSS + BUF);
+    for (const t of (trainsSND.toRuby || [])) {
+      if (t.etd === "Cancelled") continue;
+      const dep = parseTT(t.std, planDate);
+      if (!dep) continue;
+      if (dep >= readyAtStation) return t;
+    }
+    return (trainsSND.toRuby || []).find(t => t.etd !== "Cancelled") || null;
+  }, [isFriday, hasClass, effectiveEnd, trainsSND, planDate, bSS]);
+
+  const rubyFromTrain = useMemo(() => {
+    if (!isSunday) return null;
+    // Leave Ruby's at ~7pm, bike 8min to station, find first train after
+    const leaveTime = makeT(planDate, 19, 0);
+    const atStation = addM(leaveTime, BIKE_STN_RUBY.mins + BUF);
+    for (const t of (trainsSND.fromRuby || [])) {
+      if (t.etd === "Cancelled") continue;
+      const dep = parseTT(t.std, planDate);
+      if (!dep) continue;
+      if (dep >= atStation) return t;
+    }
+    return (trainsSND.fromRuby || []).find(t => t.etd !== "Cancelled") || null;
+  }, [isSunday, trainsSND, planDate]);
 
   // ═══════════════════════════════════════════════════════════
   // JOURNEY CALCULATIONS — Combined train list from both stations
