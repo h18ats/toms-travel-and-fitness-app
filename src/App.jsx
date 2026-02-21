@@ -37,6 +37,22 @@ const RUBY_LON = -0.801;
 const BIKE_STN_RUBY = { mi: 1.2, mins: 8 }; // Sandhurst station → Green Lane
 const SUNDAY_LEAVE_RUBY = "19:00"; // Tom aims to leave Ruby's ~7pm Sunday
 
+// ── SAFETY CONTACT ──────────────────────────────────────────
+const SAFETY_CONTACT = "+447000000000"; // Replace with real number
+const SAFETY_CONTACT_NAME = "Dad";
+
+// ── SWR BIKE RULES ──────────────────────────────────────────
+const SWR_BIKE_RULES = [
+  { rule: "Full-size bikes allowed on all SWR services", icon: "\u2705" },
+  { rule: "Peak restriction: no bikes on trains arriving London Waterloo 07:00-09:30", icon: "\u26A0\uFE0F" },
+  { rule: "Peak restriction: no bikes departing Waterloo 16:00-19:00", icon: "\u26A0\uFE0F" },
+  { rule: "Godalming/Woking route: no peak restrictions (non-London)", icon: "\u2705" },
+  { rule: "Max 2 bikes per carriage (4 on newer trains)", icon: "\u2139\uFE0F" },
+  { rule: "Folding bikes allowed at all times when folded", icon: "\u2705" },
+  { rule: "E-bikes and cargo bikes not permitted", icon: "\u274C" },
+  { rule: "Bikes must not block doors, aisles or vestibules", icon: "\u2139\uFE0F" },
+];
+
 // ── ROUTE DISTANCES ──────────────────────────────────────────
 const BIKE_STN_SCHOOL = { mi: 1.0, mins: 6 };  // Woking station → Woking College
 const TRAIN_MINS = 20;                           // Train journey time (via Guildford)
@@ -232,6 +248,7 @@ const getGymSlots = (sessions) => {
 // ═══════════════════════════════════════════════════════════════
 const HUXLEY = "https://national-rail-api.davwheat.dev";
 const fmt = d => d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+const fmtDate = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const fmtShort = d => d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
 const fmtLong = d => d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 const addM = (d, m) => new Date(d.getTime() + m * 60000);
@@ -418,6 +435,38 @@ export default function App() {
   const [userLoc, setUserLoc] = useState(null);
   const [locLabel, setLocLabel] = useState(null);
 
+  // Arrived Safely
+  const [safetyHistory, setSafetyHistory] = useState(() => JSON.parse(localStorage.getItem('ttc_safety') || '[]'));
+  const [showSafetyConfirm, setShowSafetyConfirm] = useState(false);
+
+  // Delay Repay
+  const [delayRepayModal, setDelayRepayModal] = useState(null); // holds delay info object or null
+  const [delayRepayHistory, setDelayRepayHistory] = useState(() => JSON.parse(localStorage.getItem('ttc_delayrep') || '[]'));
+  const [delayRepayDismissed, setDelayRepayDismissed] = useState([]);
+
+  // Timetable & Exam Upload
+  const [customTT, setCustomTT] = useState(() => JSON.parse(localStorage.getItem('ttc_custom_tt') || 'null'));
+  const [examTT, setExamTT] = useState(() => JSON.parse(localStorage.getItem('ttc_exams') || '[]'));
+  const [showTTUpload, setShowTTUpload] = useState(false);
+  const [showExamUpload, setShowExamUpload] = useState(false);
+  const [uploadingTT, setUploadingTT] = useState(false);
+  const [uploadingExam, setUploadingExam] = useState(false);
+
+  // Railcard Savings
+  const [costLog, setCostLog] = useState(() => JSON.parse(localStorage.getItem('ttc_costs') || '[]'));
+  const [showCostEntry, setShowCostEntry] = useState(false);
+  const [costInput, setCostInput] = useState('');
+
+  // Commute Stats
+  const [commuteLog, setCommuteLog] = useState(() => JSON.parse(localStorage.getItem('ttc_commute') || '[]'));
+
+  // Bank Holidays
+  const [bankHols, setBankHols] = useState([]);
+
+  // Error states
+  const [wxError, setWxError] = useState(false);
+  const [trainError, setTrainError] = useState(false);
+
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
 
   useEffect(() => {
@@ -492,9 +541,21 @@ export default function App() {
 
   const isToday = planDate.toDateString() === new Date().toDateString();
   const isFuture = !isToday;
-  const tt = TT[planDate.getDay()];
+  const tt = customTT ? (customTT[planDate.getDay()] || TT[planDate.getDay()]) : TT[planDate.getDay()];
   const hasClass = tt.sessions.length > 0;
   const inTerm = planDate >= TERM_START && planDate <= TERM_END;
+  const isBankHol = bankHols.includes(planDate.toISOString().split('T')[0]) || bankHols.includes(fmtDate(planDate));
+
+  // Live distance from current position to nearest station (bike ETA)
+  const liveStationETA = useMemo(() => {
+    if (!userLoc) return null;
+    const godDist = haversine(userLoc.lat, userLoc.lon, 51.186, -0.611); // Godalming station
+    const fncDist = haversine(userLoc.lat, userLoc.lon, 51.193, -0.607); // Farncombe station
+    const nearest = godDist < fncDist ? { name: "Godalming", code: "GOD", dist: godDist } : { name: "Farncombe", code: "FNC", dist: fncDist };
+    const bikeMinutes = Math.round(nearest.dist / 0.25); // ~15km/h average cycling = 0.25km/min
+    const walkMinutes = Math.round(nearest.dist / 0.083); // ~5km/h walking = 0.083km/min
+    return { ...nearest, bikeMinutes, walkMinutes };
+  }, [userLoc]);
   const afterSchool = AFTER_SCHOOL[planDate.getDay()];
   const peSession = tt.sessions.find(s => s.pe);
   const dayActivities = [peSession, showAfterSchool ? afterSchool : null].filter(Boolean);
@@ -513,10 +574,14 @@ export default function App() {
   // WEATHER + BIKE ADJUSTMENTS
   // ═══════════════════════════════════════════════════════════
   const fetchWx = useCallback(async () => {
-    try { const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${WX_LAT}&longitude=${WX_LON}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_gusts_10m&hourly=temperature_2m,precipitation_probability,weather_code&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_probability_max,weather_code&timezone=Europe/London&forecast_days=7`); setWx(await r.json()); } catch (e) { console.error(e); }
-  }, []);
+    setWxError(false);
+    const lat = userLoc?.lat || WX_LAT;
+    const lon = userLoc?.lon || WX_LON;
+    try { const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_gusts_10m&hourly=temperature_2m,precipitation_probability,weather_code&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_probability_max,weather_code&timezone=Europe/London&forecast_days=7`); setWx(await r.json()); } catch (e) { console.error(e); setWxError(true); }
+  }, [userLoc]);
 
   const fetchTrains = useCallback(async () => {
+    setTrainError(false);
     try {
       const [godTo, godFrom, fncTo, fncFrom] = await Promise.all([
         fetch(`${HUXLEY}/departures/GOD/to/${SCHOOL_STATION_CODE}/15?expand=true`),
@@ -556,7 +621,7 @@ export default function App() {
           fromRuby: addArrival(sndGldD.trainServices, "GLD"),
         });
       } catch (e) { console.error("Sandhurst trains:", e); }
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); setTrainError(true); }
   }, []);
 
   useEffect(() => {
@@ -566,6 +631,23 @@ export default function App() {
   }, [fetchWx, fetchTrains]);
 
   useEffect(() => setSelTrain(null), [planDate, dir]);
+
+  useEffect(() => { localStorage.setItem('ttc_safety', JSON.stringify(safetyHistory)); }, [safetyHistory]);
+  useEffect(() => { localStorage.setItem('ttc_delayrep', JSON.stringify(delayRepayHistory)); }, [delayRepayHistory]);
+  useEffect(() => { localStorage.setItem('ttc_costs', JSON.stringify(costLog)); }, [costLog]);
+  useEffect(() => { localStorage.setItem('ttc_commute', JSON.stringify(commuteLog)); }, [commuteLog]);
+  useEffect(() => { if (customTT) localStorage.setItem('ttc_custom_tt', JSON.stringify(customTT)); }, [customTT]);
+  useEffect(() => { localStorage.setItem('ttc_exams', JSON.stringify(examTT)); }, [examTT]);
+
+  useEffect(() => {
+    fetch('https://www.gov.uk/bank-holidays.json')
+      .then(r => r.json())
+      .then(d => {
+        const dates = (d['england-and-wales']?.events || []).map(e => e.date);
+        setBankHols(dates);
+      })
+      .catch(() => {});
+  }, []);
 
   // Weather for plan date
   const daysFromNow = Math.round((planDate - dayClone(now)) / 864e5);
@@ -666,6 +748,16 @@ export default function App() {
         const arrCollege = addM(arrDest, bSS + BUF);
         if (arrCollege <= arriveBy) best = t;
       }
+      if (!best && isToday) {
+        for (const t of allTrains) {
+          if (t.etd === "Cancelled") continue;
+          const dep = parseTT(t.std, planDate);
+          if (!dep) continue;
+          const bikeToStn = HOME_STATIONS[t.stnKey].bikeMins + bikeAdj;
+          if (addM(now, bikeToStn + BUF) > dep) continue;
+          return t; // First catchable train, even if late
+        }
+      }
       return best || null;
     }
     // "from" direction: first catchable train after finish
@@ -730,17 +822,17 @@ export default function App() {
     const depName = dir === "to" ? (activeStn?.name || "Godalming") : SCHOOL_STATION;
     const arrName = dir === "to" ? SCHOOL_STATION : (activeStn?.name || "Godalming");
     const timeStr = activeTrain?.std || (dir === "to" ? fmt(J.tDep) : fmt(J.tDep));
-    const dt = planDate.toISOString().split("T")[0] + "T" + timeStr.slice(0,5) + ":00";
+    const dt = fmtDate(planDate) + "T" + timeStr.slice(0,5) + ":00";
     return `https://www.thetrainline.com/book/results?journeySearchType=single&origin=${encodeURIComponent(depName)}&destination=${encodeURIComponent(arrName)}&outwardDate=${encodeURIComponent(dt)}&outwardDateType=departAfter&passengers%5B%5D=2008-01-01%7C16-25-railcard`;
   }, [dir, activeStn, planDate, activeTrain, J]);
 
   const rubyTrainlineUrl = useMemo(() => {
     if (isFriday && rubyToTrain) {
-      const dt = planDate.toISOString().split("T")[0] + "T" + rubyToTrain.std + ":00";
+      const dt = fmtDate(planDate) + "T" + rubyToTrain.std + ":00";
       return `https://www.thetrainline.com/book/results?journeySearchType=single&origin=${encodeURIComponent(SCHOOL_STATION)}&destination=${encodeURIComponent(RUBY_STATION)}&outwardDate=${encodeURIComponent(dt)}&outwardDateType=departAfter&passengers%5B%5D=2008-01-01%7C16-25-railcard`;
     }
     if (isSunday && rubyFromTrain) {
-      const dt = planDate.toISOString().split("T")[0] + "T" + rubyFromTrain.std + ":00";
+      const dt = fmtDate(planDate) + "T" + rubyFromTrain.std + ":00";
       return `https://www.thetrainline.com/book/results?journeySearchType=single&origin=${encodeURIComponent(RUBY_STATION)}&destination=${encodeURIComponent("Godalming")}&outwardDate=${encodeURIComponent(dt)}&outwardDateType=departAfter&passengers%5B%5D=2008-01-01%7C16-25-railcard`;
     }
     return null;
@@ -752,6 +844,170 @@ export default function App() {
     const arrStn = dir === "to" ? SCHOOL_STATION_CODE : (activeStn?.code || "GOD");
     return `https://www.nationalrail.co.uk/live-trains/departures/${depStn}/to/${arrStn}`;
   }, [dir, activeStn]);
+
+  // Delay Repay detection — check if active train is 15+ min late
+  useEffect(() => {
+    if (!activeTrain || !isToday) return;
+    const scheduled = parseTT(activeTrain.std, planDate);
+    const expected = parseTT(activeTrain.etd, planDate);
+    if (!scheduled || !expected) return;
+    const delayMins = diffM(expected, scheduled);
+    if (delayMins >= 15 && !delayRepayDismissed.includes(trainKey(activeTrain))) {
+      setDelayRepayModal({
+        date: fmtDate(planDate),
+        from: dir === "to" ? (activeStn?.name || "Godalming") : SCHOOL_STATION,
+        fromCode: dir === "to" ? (activeStn?.code || "GOD") : SCHOOL_STATION_CODE,
+        to: dir === "to" ? SCHOOL_STATION : (activeStn?.name || "Godalming"),
+        toCode: dir === "to" ? SCHOOL_STATION_CODE : (activeStn?.code || "GOD"),
+        scheduled: activeTrain.std,
+        expected: activeTrain.etd,
+        delayMins,
+        operator: activeTrain.operator || "South Western Railway",
+        trainId: trainKey(activeTrain),
+      });
+    }
+  }, [activeTrain, isToday, delayRepayDismissed]);
+
+  // Auto-log commute when Tom arrives (geolocation-based)
+  useEffect(() => {
+    if (!isToday || !locLabel) return;
+    const todayStr = fmtDate(new Date());
+    const alreadyLogged = commuteLog.some(c => c.date === todayStr);
+    if (!alreadyLogged && (locLabel === "At college" || locLabel === "Near college") && dir === "to") {
+      const bikeKm = ((activeStn?.bikeMi || 2.5) + BIKE_STN_SCHOOL.mi) * 1.609;
+      setCommuteLog(prev => [...prev, { date: todayStr, bikeKm: Math.round(bikeKm * 10) / 10, mode: "bike+train" }]);
+    }
+  }, [locLabel, isToday, dir]);
+
+  const handleTTUpload = async (file) => {
+    setUploadingTT(true);
+    try {
+      const isImage = file.type.startsWith('image/');
+      let body;
+      if (isImage) {
+        const b64 = await new Promise((res) => {
+          const reader = new FileReader();
+          reader.onload = () => res(reader.result.split(',')[1]);
+          reader.readAsDataURL(file);
+        });
+        body = { type: 'image', content: b64, mediaType: file.type };
+      } else {
+        const text = await file.text();
+        body = { type: 'text', content: text };
+      }
+      const resp = await fetch('/api/parse-timetable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!resp.ok) throw new Error('Parse failed');
+      const data = await resp.json();
+      if (data.sessions) {
+        setCustomTT(data.sessions);
+        setShowTTUpload(false);
+      }
+    } catch (e) {
+      console.error('TT upload error:', e);
+      alert('Could not parse timetable. Try pasting the text instead, or check the image quality.');
+    }
+    setUploadingTT(false);
+  };
+
+  const handleExamUpload = async (file) => {
+    setUploadingExam(true);
+    try {
+      const isImage = file.type.startsWith('image/');
+      let body;
+      if (isImage) {
+        const b64 = await new Promise((res) => {
+          const reader = new FileReader();
+          reader.onload = () => res(reader.result.split(',')[1]);
+          reader.readAsDataURL(file);
+        });
+        body = { type: 'exam_image', content: b64, mediaType: file.type };
+      } else {
+        const text = await file.text();
+        body = { type: 'exam_text', content: text };
+      }
+      const resp = await fetch('/api/parse-timetable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!resp.ok) throw new Error('Parse failed');
+      const data = await resp.json();
+      if (data.exams) {
+        setExamTT(data.exams);
+        setShowExamUpload(false);
+      }
+    } catch (e) {
+      console.error('Exam upload error:', e);
+      alert('Could not parse exam timetable. Try pasting the text instead.');
+    }
+    setUploadingExam(false);
+  };
+
+  // Railcard savings helpers
+  const logCost = () => {
+    const price = parseFloat(costInput);
+    if (isNaN(price) || price <= 0) return;
+    const railcardPrice = Math.round(price * 0.6667 * 100) / 100;
+    const entry = { date: fmtDate(new Date()), price, railcardPrice, saved: Math.round((price - railcardPrice) * 100) / 100 };
+    setCostLog(prev => [...prev, entry]);
+    setCostInput('');
+    setShowCostEntry(false);
+  };
+
+  // Arrived safely handler
+  const sendArrivedSafely = () => {
+    const msg = `Hi ${SAFETY_CONTACT_NAME}, Tom has arrived safely at ${SCHOOL_NAME}. ${fmt(new Date())}`;
+    const smsUrl = `sms:${SAFETY_CONTACT}?body=${encodeURIComponent(msg)}`;
+    window.open(smsUrl, '_blank');
+    const entry = { date: fmtDate(new Date()), time: fmt(new Date()), location: locLabel || "College" };
+    setSafetyHistory(prev => [entry, ...prev].slice(0, 50));
+    setShowSafetyConfirm(true);
+    setTimeout(() => setShowSafetyConfirm(false), 3000);
+  };
+
+  // Commute stats calculations
+  const thisWeekCommutes = commuteLog.filter(c => {
+    const d = new Date(c.date);
+    const now2 = new Date();
+    const weekStart = new Date(now2);
+    weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+    weekStart.setHours(0,0,0,0);
+    return d >= weekStart;
+  });
+  const thisMonthCommutes = commuteLog.filter(c => {
+    const d = new Date(c.date);
+    return d.getMonth() === new Date().getMonth() && d.getFullYear() === new Date().getFullYear();
+  });
+  const totalBikeKm = commuteLog.reduce((s, c) => s + (c.bikeKm || 0), 0);
+  const co2SavedKg = Math.round(totalBikeKm * 0.12 * 10) / 10; // 120g CO2/km for car
+  const streakDays = (() => {
+    let streak = 0;
+    const sorted = [...commuteLog].sort((a, b) => new Date(b.date) - new Date(a.date));
+    if (!sorted.length) return 0;
+    let check = dayClone(new Date());
+    for (const c of sorted) {
+      const cd = new Date(c.date);
+      if (cd.toDateString() === check.toDateString()) { streak++; check = dayClone(check, -1); while (check.getDay() === 0 || check.getDay() === 6) check = dayClone(check, -1); }
+      else break;
+    }
+    return streak;
+  })();
+
+  // Railcard savings summary
+  const thisWeekCosts = costLog.filter(c => {
+    const d = new Date(c.date);
+    const weekStart = new Date();
+    weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+    weekStart.setHours(0,0,0,0);
+    return d >= weekStart;
+  });
+  const thisMonthCosts = costLog.filter(c => {
+    const d = new Date(c.date);
+    return d.getMonth() === new Date().getMonth() && d.getFullYear() === new Date().getFullYear();
+  });
+  const totalSaved = costLog.reduce((s, c) => s + (c.saved || 0), 0);
+
+  // Upcoming exams
+  const upcomingExams = examTT.filter(e => new Date(e.date) >= dayClone(new Date())).sort((a, b) => new Date(a.date) - new Date(b.date)).slice(0, 5);
+  const nextExam = upcomingExams[0] || null;
+  const isExamDay = examTT.some(e => e.date === fmtDate(planDate));
+  const todayExams = examTT.filter(e => e.date === fmtDate(planDate));
 
   // ═══ LOADING ═══════════════════════════════════════════════
   if (loading) return (
@@ -801,7 +1057,7 @@ export default function App() {
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 4, color: "#818cf8", textTransform: "uppercase" }}>{"\uD83D\uDEB2"} Tom's Travel Companion {"\uD83D\uDE82"}</div>
           <div className="header-time" style={{ fontSize: 42, fontWeight: 900, letterSpacing: -1, fontFamily: "'JetBrains Mono',monospace", background: "linear-gradient(135deg,#e2e8f0,#818cf8,#6ee7b7)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>{fmt(now)}</div>
           <div style={{ fontSize: 12, color: "#64748b" }}>{fmtLong(now)}</div>
-          {locLabel && <div style={{ fontSize: 10, color: "#6ee7b7", marginTop: 2 }}>{"\uD83D\uDCCD"} {locLabel}</div>}
+          {locLabel && <div style={{ fontSize: 10, color: "#6ee7b7", marginTop: 2 }}>{"\uD83D\uDCCD"} {locLabel}{liveStationETA && locLabel !== "At college" && locLabel !== "Near college" ? ` \u2022 ${liveStationETA.bikeMinutes}min bike to ${liveStationETA.name}` : ""}</div>}
         </div>
 
         {/* OPTIONAL FEATURE TOGGLES */}
@@ -855,11 +1111,11 @@ export default function App() {
         </Card>
 
         {/* NO SCHOOL / OUT OF TERM */}
-        {(!hasClass || !inTerm) && (
+        {(!hasClass || !inTerm || isBankHol) && (
           <Card style={{ marginBottom: 14, borderColor: "rgba(139,92,246,.2)" }}>
             <div style={{ textAlign: "center", padding: 10 }}>
-              <div style={{ fontSize: 28, marginBottom: 6 }}>{!inTerm ? "\uD83C\uDFD6\uFE0F" : "\uD83D\uDE34"}</div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: "#a78bfa" }}>{!inTerm ? "Outside Term Dates" : `No College on ${tt.label}s`}</div>
+              <div style={{ fontSize: 28, marginBottom: 6 }}>{isBankHol ? "\uD83C\uDDEC\uD83C\uDDE7" : !inTerm ? "\uD83C\uDFD6\uFE0F" : "\uD83D\uDE34"}</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#a78bfa" }}>{isBankHol ? "Bank Holiday \u2014 No College" : !inTerm ? "Outside Term Dates" : `No College on ${tt.label}s`}</div>
               <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>Train times shown below for reference</div>
             </div>
           </Card>
@@ -1020,6 +1276,28 @@ export default function App() {
           </div>
         )}
 
+        {/* ARRIVED SAFELY */}
+        {isToday && hasClass && inTerm && (locLabel === "At college" || locLabel === "Near college") && (
+          <div style={{ marginBottom: 14, animation: "slideIn .58s" }}>
+            <button onClick={sendArrivedSafely} style={{
+              width: "100%", padding: "16px 20px", borderRadius: 14, border: "2px solid rgba(16,185,129,.4)",
+              background: "linear-gradient(135deg,rgba(16,185,129,.15),rgba(6,78,59,.2))",
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+              transition: "all .2s",
+            }}>
+              <span style={{ fontSize: 28 }}>{showSafetyConfirm ? "\u2705" : "\uD83D\uDFE2"}</span>
+              <div style={{ textAlign: "left" }}>
+                <div style={{ fontSize: 16, fontWeight: 800, color: showSafetyConfirm ? "#6ee7b7" : "#e2e8f0" }}>
+                  {showSafetyConfirm ? "Sent! Stay safe today" : "I've Arrived Safely"}
+                </div>
+                <div style={{ fontSize: 11, color: "#6ee7b7" }}>
+                  {showSafetyConfirm ? `Notified ${SAFETY_CONTACT_NAME}` : `Tap to notify ${SAFETY_CONTACT_NAME} via SMS`}
+                </div>
+              </div>
+            </button>
+          </div>
+        )}
+
         {/* WEEKEND AT RUBY'S */}
         {isWeekendRuby && inTerm && (
           <Card style={{ marginBottom: 14, animation: "slideIn .58s" }} glow="rgba(236,72,153,.1)">
@@ -1102,6 +1380,42 @@ export default function App() {
           </Card>
         )}
 
+        {/* EXAM COUNTDOWN */}
+        {upcomingExams.length > 0 && (
+          <Card style={{ marginBottom: 14, animation: "slideIn .59s" }} glow="rgba(239,68,68,.1)">
+            <Lbl icon={"\uD83D\uDCDD"}>Upcoming Exams</Lbl>
+            {isExamDay && todayExams.length > 0 && (
+              <div style={{ marginBottom: 10, padding: "12px 14px", borderRadius: 10, background: "linear-gradient(135deg,rgba(239,68,68,.15),rgba(185,28,28,.1))", border: "1px solid rgba(239,68,68,.3)" }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: "#fca5a5", marginBottom: 4 }}>{"\u26A0\uFE0F"} EXAM TODAY</div>
+                {todayExams.map((ex, i) => (
+                  <div key={i} style={{ fontSize: 12, color: "#e2e8f0" }}>
+                    <strong>{ex.time}</strong> — {ex.subj} {ex.room && <>in {ex.room}</>} ({ex.duration}min)
+                  </div>
+                ))}
+                <div style={{ fontSize: 11, color: "#fcd34d", marginTop: 6 }}>Leave extra early — arrive 30min before your exam!</div>
+              </div>
+            )}
+            {upcomingExams.map((ex, i) => {
+              const examDate = new Date(ex.date);
+              const daysUntil = Math.ceil((examDate - dayClone(new Date())) / 864e5);
+              return (
+                <div key={i} style={{ padding: "8px 12px", borderRadius: 8, marginBottom: 4, backgroundColor: daysUntil <= 3 ? "rgba(239,68,68,.08)" : "rgba(99,102,241,.05)", border: `1px solid ${daysUntil <= 3 ? "rgba(239,68,68,.15)" : "rgba(99,102,241,.08)"}` }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0" }}>{ex.subj}</span>
+                      <span style={{ fontSize: 10, color: "#94a3b8", marginLeft: 8 }}>{ex.time} · {ex.duration}min {ex.room && `· ${ex.room}`}</span>
+                    </div>
+                    <span style={{ fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace", color: daysUntil <= 3 ? "#fca5a5" : daysUntil <= 7 ? "#fcd34d" : "#6ee7b7" }}>
+                      {daysUntil === 0 ? "TODAY" : daysUntil === 1 ? "TOMORROW" : `${daysUntil} days`}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 10, color: "#64748b" }}>{examDate.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}</div>
+                </div>
+              );
+            })}
+          </Card>
+        )}
+
         {/* MAIN GRID: TIMETABLE / WEATHER / CLOTHING */}
         <div className="main-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
           {/* TIMETABLE */}
@@ -1171,6 +1485,13 @@ export default function App() {
                 <div>{"\uD83C\uDF27"} {isFuture && wx.daily ? `${wx.daily.precipitation_probability_max?.[wxIdx] || 0}%` : `${curPrecip}mm`}</div>
               </div>
             </>}
+            {!wx?.current && wxError && (
+              <div style={{ textAlign: "center", padding: 14 }}>
+                <div style={{ fontSize: 22, marginBottom: 4 }}>{"\u26A0\uFE0F"}</div>
+                <div style={{ fontSize: 12, color: "#fca5a5", fontWeight: 600 }}>Weather unavailable</div>
+                <div style={{ fontSize: 10, color: "#64748b", marginTop: 4 }}>Check <a href="https://www.metoffice.gov.uk/weather/forecast/gcpf33k42" target="_blank" rel="noopener noreferrer" style={{ color: "#818cf8" }}>Met Office</a></div>
+              </div>
+            )}
             {wx?.daily && <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(148,163,184,.06)" }}><div style={{ display: "flex", gap: 5 }}>{[0, 1, 2].map(i => <div key={i} style={{ flex: 1, textAlign: "center", padding: "4px 2px", borderRadius: 8, backgroundColor: wxIdx === i ? "rgba(99,102,241,.1)" : "rgba(99,102,241,.03)", border: wxIdx === i ? "1px solid rgba(99,102,241,.2)" : "1px solid transparent" }}><div style={{ fontSize: 9, color: "#94a3b8", fontWeight: 600 }}>{i === 0 ? "Today" : DAYS[new Date(Date.now() + i * 864e5).getDay()].slice(0, 3)}</div><div style={{ fontSize: 16 }}>{wxI(wx.daily.weather_code[i])}</div><div style={{ fontSize: 10, fontFamily: "'JetBrains Mono',monospace", fontWeight: 700 }}>{Math.round(wx.daily.temperature_2m_max[i])}{"\u00B0"}</div></div>)}</div></div>}
           </Card>
 
@@ -1406,6 +1727,13 @@ export default function App() {
             {["Stn", "Dep", "Arr", "Status", "Plat", "Destination", ""].map((h, i) => <span key={i} style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: "#475569", textTransform: "uppercase" }}>{h}</span>)}
           </div>
 
+          {allTrains.length === 0 && trainError && (
+            <div style={{ textAlign: "center", padding: 20 }}>
+              <div style={{ fontSize: 22, marginBottom: 4 }}>{"\u26A0\uFE0F"}</div>
+              <div style={{ fontSize: 12, color: "#fca5a5", fontWeight: 600 }}>Train data unavailable</div>
+              <div style={{ fontSize: 10, color: "#64748b", marginTop: 4 }}>Check <a href="https://www.nationalrail.co.uk" target="_blank" rel="noopener noreferrer" style={{ color: "#818cf8" }}>National Rail</a></div>
+            </div>
+          )}
           {allTrains.length === 0 ? <div style={{ textAlign: "center", padding: 20, color: "#64748b" }}><div style={{ fontSize: 22, marginBottom: 4 }}>{"\uD83D\uDE82"}</div><div style={{ fontSize: 12 }}>{isFuture ? "Live trains show today's schedule as a guide" : "No trains listed"}</div></div>
             : allTrains.map((t, i) => {
               const sc = t.std || "\u2014"; const es = t.etd || "\u2014";
@@ -1473,6 +1801,157 @@ export default function App() {
           </div>
         </Card>
 
+        {/* BIKE-ON-TRAIN RULES */}
+        <Card style={{ marginTop: 14, animation: "slideIn .86s" }}>
+          <Lbl icon={"\uD83D\uDEB2"}>Bike-on-Train Rules (SWR)</Lbl>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {SWR_BIKE_RULES.map((r, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 11, color: "#cbd5e1", padding: "4px 0" }}>
+                <span style={{ flexShrink: 0 }}>{r.icon}</span><span>{r.rule}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: 8, fontSize: 10, color: "#64748b" }}>
+            Source: South Western Railway · Tom's route (Godalming/Farncombe → Woking) has no peak restrictions
+          </div>
+        </Card>
+
+        {/* COMMUTE STATS & CO2 */}
+        {commuteLog.length > 0 && (
+          <Card style={{ marginTop: 14, animation: "slideIn .88s" }} glow="rgba(16,185,129,.06)">
+            <Lbl icon={"\uD83D\uDCCA"}>Commute Stats & CO2 Savings</Lbl>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
+              {[
+                { v: streakDays, l: "Day Streak", icon: "\uD83D\uDD25", c: "#f59e0b" },
+                { v: thisWeekCommutes.length, l: "This Week", icon: "\uD83D\uDCC5", c: "#818cf8" },
+                { v: `${Math.round(totalBikeKm)}km`, l: "Total Cycled", icon: "\uD83D\uDEB2", c: "#6ee7b7" },
+                { v: `${co2SavedKg}kg`, l: "CO2 Saved", icon: "\uD83C\uDF3F", c: "#22c55e" },
+              ].map((s, i) => (
+                <div key={i} style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, backgroundColor: "rgba(99,102,241,.05)", border: "1px solid rgba(99,102,241,.08)" }}>
+                  <div style={{ fontSize: 14 }}>{s.icon}</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: s.c }}>{s.v}</div>
+                  <div style={{ fontSize: 9, color: "#94a3b8", fontWeight: 600 }}>{s.l}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: 10, color: "#64748b", textAlign: "center" }}>
+              {thisMonthCommutes.length} commutes this month · {commuteLog.length} total tracked
+            </div>
+          </Card>
+        )}
+
+        {/* RAILCARD SAVINGS TRACKER */}
+        <Card style={{ marginTop: 14, animation: "slideIn .9s" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <Lbl icon={"\uD83C\uDFAB"}>16-25 Railcard Savings</Lbl>
+            <button onClick={() => setShowCostEntry(p => !p)} style={{
+              padding: "4px 12px", borderRadius: 8, border: "1px solid rgba(16,185,129,.3)",
+              backgroundColor: "rgba(16,185,129,.1)", color: "#6ee7b7", fontSize: 10, fontWeight: 700, cursor: "pointer"
+            }}>{showCostEntry ? "Cancel" : "+ Log Ticket"}</button>
+          </div>
+          {showCostEntry && (
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <input value={costInput} onChange={e => setCostInput(e.target.value)} placeholder="Full ticket price (\u00A3)" type="number" step="0.01" style={{
+                flex: 1, padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(148,163,184,.2)",
+                backgroundColor: "rgba(15,23,42,.8)", color: "#e2e8f0", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", outline: "none"
+              }} />
+              <button onClick={logCost} style={{
+                padding: "8px 16px", borderRadius: 8, border: "none",
+                backgroundColor: "#10b981", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer"
+              }}>Save</button>
+            </div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+            {[
+              { v: `\u00A3${thisWeekCosts.reduce((s, c) => s + c.saved, 0).toFixed(2)}`, l: "Saved This Week", c: "#6ee7b7" },
+              { v: `\u00A3${thisMonthCosts.reduce((s, c) => s + c.saved, 0).toFixed(2)}`, l: "Saved This Month", c: "#818cf8" },
+              { v: `\u00A3${totalSaved.toFixed(2)}`, l: "Total Saved", c: "#f59e0b" },
+            ].map((s, i) => (
+              <div key={i} style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, backgroundColor: "rgba(99,102,241,.05)", border: "1px solid rgba(99,102,241,.08)" }}>
+                <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: s.c }}>{s.v}</div>
+                <div style={{ fontSize: 9, color: "#94a3b8", fontWeight: 600 }}>{s.l}</div>
+              </div>
+            ))}
+          </div>
+          {costLog.length > 0 && (
+            <div style={{ marginTop: 8, fontSize: 10, color: "#64748b", textAlign: "center" }}>
+              {costLog.length} tickets logged · Avg saving: \u00A3{(totalSaved / costLog.length).toFixed(2)} per ticket
+            </div>
+          )}
+        </Card>
+
+        {/* TIMETABLE & EXAM MANAGEMENT */}
+        <Card style={{ marginTop: 14, animation: "slideIn .92s" }}>
+          <Lbl icon={"\u2699\uFE0F"}>Timetable & Exam Management</Lbl>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={() => setShowTTUpload(p => !p)} style={{
+              padding: "8px 16px", borderRadius: 10, border: "1px solid rgba(99,102,241,.3)",
+              backgroundColor: "rgba(99,102,241,.1)", color: "#818cf8", fontSize: 11, fontWeight: 700, cursor: "pointer"
+            }}>{"\uD83D\uDCF7"} {showTTUpload ? "Cancel" : customTT ? "Update Timetable" : "Upload Timetable"}</button>
+            <button onClick={() => setShowExamUpload(p => !p)} style={{
+              padding: "8px 16px", borderRadius: 10, border: "1px solid rgba(239,68,68,.3)",
+              backgroundColor: "rgba(239,68,68,.1)", color: "#fca5a5", fontSize: 11, fontWeight: 700, cursor: "pointer"
+            }}>{"\uD83D\uDCDD"} {showExamUpload ? "Cancel" : examTT.length > 0 ? "Update Exams" : "Upload Exam Timetable"}</button>
+            {customTT && (
+              <button onClick={() => { setCustomTT(null); localStorage.removeItem('ttc_custom_tt'); }} style={{
+                padding: "8px 16px", borderRadius: 10, border: "1px solid rgba(148,163,184,.2)",
+                backgroundColor: "rgba(148,163,184,.05)", color: "#94a3b8", fontSize: 11, fontWeight: 700, cursor: "pointer"
+              }}>Reset to Default Timetable</button>
+            )}
+          </div>
+          {customTT && <div style={{ marginTop: 6, fontSize: 10, color: "#6ee7b7" }}>{"\u2705"} Using uploaded timetable</div>}
+
+          {showTTUpload && (
+            <div style={{ marginTop: 12, padding: "14px", borderRadius: 10, backgroundColor: "rgba(99,102,241,.06)", border: "1px solid rgba(99,102,241,.15)" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#c7d2fe", marginBottom: 8 }}>Upload your timetable photo or paste text</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <label style={{
+                  padding: "10px 20px", borderRadius: 10, border: "2px dashed rgba(99,102,241,.3)",
+                  backgroundColor: "rgba(99,102,241,.05)", color: "#818cf8", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "center", flex: 1
+                }}>
+                  {uploadingTT ? "Processing..." : "\uD83D\uDCF7 Take Photo / Upload Image"}
+                  <input type="file" accept="image/*" capture="environment" onChange={e => e.target.files[0] && handleTTUpload(e.target.files[0])} style={{ display: "none" }} disabled={uploadingTT} />
+                </label>
+                <label style={{
+                  padding: "10px 20px", borderRadius: 10, border: "2px dashed rgba(16,185,129,.3)",
+                  backgroundColor: "rgba(16,185,129,.05)", color: "#6ee7b7", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "center", flex: 1
+                }}>
+                  {"\uD83D\uDCC4"} Upload Text File
+                  <input type="file" accept=".txt,.csv,.ics" onChange={e => e.target.files[0] && handleTTUpload(e.target.files[0])} style={{ display: "none" }} disabled={uploadingTT} />
+                </label>
+              </div>
+              <div style={{ marginTop: 6, fontSize: 10, color: "#94a3b8" }}>
+                Supports: photos of printed timetables, screenshots, .txt, .csv files. AI-powered extraction via Claude.
+              </div>
+            </div>
+          )}
+
+          {showExamUpload && (
+            <div style={{ marginTop: 12, padding: "14px", borderRadius: 10, backgroundColor: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.15)" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#fca5a5", marginBottom: 8 }}>Upload your exam timetable</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <label style={{
+                  padding: "10px 20px", borderRadius: 10, border: "2px dashed rgba(239,68,68,.3)",
+                  backgroundColor: "rgba(239,68,68,.05)", color: "#fca5a5", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "center", flex: 1
+                }}>
+                  {uploadingExam ? "Processing..." : "\uD83D\uDCF7 Take Photo / Upload Image"}
+                  <input type="file" accept="image/*" capture="environment" onChange={e => e.target.files[0] && handleExamUpload(e.target.files[0])} style={{ display: "none" }} disabled={uploadingExam} />
+                </label>
+                <label style={{
+                  padding: "10px 20px", borderRadius: 10, border: "2px dashed rgba(245,158,11,.3)",
+                  backgroundColor: "rgba(245,158,11,.05)", color: "#fcd34d", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "center", flex: 1
+                }}>
+                  {"\uD83D\uDCC4"} Upload Text File
+                  <input type="file" accept=".txt,.csv" onChange={e => e.target.files[0] && handleExamUpload(e.target.files[0])} style={{ display: "none" }} disabled={uploadingExam} />
+                </label>
+              </div>
+              <div style={{ marginTop: 6, fontSize: 10, color: "#94a3b8" }}>
+                Upload exam schedule photo or text. AI extracts dates, times, subjects, rooms and seat numbers.
+              </div>
+            </div>
+          )}
+        </Card>
+
         {/* FOOTER */}
         <div style={{ textAlign: "center", marginTop: 16, fontSize: 10, color: "#475569" }}>
           <div>{HOME_POSTCODE} {"\uD83D\uDEB2"} Godalming / Farncombe {"\uD83D\uDE82"} {SCHOOL_STATION} {"\uD83D\uDE82"} {RUBY_STATION} {"\u2764\uFE0F"} {RUBY_POSTCODE}</div>
@@ -1480,6 +1959,49 @@ export default function App() {
           <div style={{ marginTop: 6 }}><button onClick={() => { fetchTrains(); fetchWx(); }} style={{ padding: "5px 14px", borderRadius: 8, border: "1px solid rgba(99,102,241,.3)", backgroundColor: "rgba(99,102,241,.1)", color: "#818cf8", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>{"\uD83D\uDD04"} Refresh</button></div>
         </div>
       </div>
+
+      {/* DELAY REPAY MODAL */}
+      {delayRepayModal && (
+        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,.7)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: 20 }} onClick={() => { setDelayRepayDismissed(p => [...p, delayRepayModal.trainId]); setDelayRepayModal(null); }}>
+          <div onClick={e => e.stopPropagation()} style={{ maxWidth: 420, width: "100%", padding: "24px", borderRadius: 16, backgroundColor: "#0f172a", border: "2px solid rgba(239,68,68,.4)", boxShadow: "0 20px 60px rgba(0,0,0,.6)" }}>
+            <div style={{ textAlign: "center", marginBottom: 16 }}>
+              <div style={{ fontSize: 36, marginBottom: 8 }}>{"\uD83D\uDCB0"}</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: "#fca5a5" }}>Delay Repay Eligible!</div>
+              <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>Your train was {delayRepayModal.delayMins}+ minutes late. You can claim compensation.</div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
+              {[
+                { l: "Date", v: delayRepayModal.date },
+                { l: "From", v: `${delayRepayModal.from} (${delayRepayModal.fromCode})` },
+                { l: "To", v: `${delayRepayModal.to} (${delayRepayModal.toCode})` },
+                { l: "Scheduled", v: delayRepayModal.scheduled },
+                { l: "Expected", v: delayRepayModal.expected },
+                { l: "Delay", v: `${delayRepayModal.delayMins} minutes` },
+                { l: "Operator", v: delayRepayModal.operator },
+              ].map((r, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", borderRadius: 6, backgroundColor: "rgba(99,102,241,.05)" }}>
+                  <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600 }}>{r.l}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0", fontFamily: "'JetBrains Mono',monospace" }}>{r.v}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <a href="https://www.southwesternrailway.com/contact-and-help/delay-repay" target="_blank" rel="noopener noreferrer" onClick={() => {
+                setDelayRepayHistory(prev => [{ ...delayRepayModal, claimedAt: new Date().toISOString(), status: "submitted" }, ...prev]);
+                setDelayRepayDismissed(p => [...p, delayRepayModal.trainId]);
+                setDelayRepayModal(null);
+              }} style={{
+                flex: 1, padding: "12px", borderRadius: 10, border: "none", textAlign: "center", textDecoration: "none",
+                backgroundColor: "#10b981", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer"
+              }}>Claim Now {"\u2192"}</a>
+              <button onClick={() => { setDelayRepayDismissed(p => [...p, delayRepayModal.trainId]); setDelayRepayModal(null); }} style={{
+                padding: "12px 20px", borderRadius: 10, border: "1px solid rgba(148,163,184,.2)",
+                backgroundColor: "rgba(148,163,184,.05)", color: "#94a3b8", fontSize: 12, fontWeight: 600, cursor: "pointer"
+              }}>Dismiss</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
