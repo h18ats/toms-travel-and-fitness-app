@@ -827,26 +827,29 @@ export default function App() {
     const arrName = dir === "to" ? SCHOOL_STATION : (activeStn?.name || "Godalming");
     const timeStr = activeTrain?.std || (dir === "to" ? fmt(J.tDep) : fmt(J.tDep));
     const dt = fmtDate(planDate) + "T" + timeStr.slice(0,5) + ":00";
-    return `https://www.thetrainline.com/book/results?journeySearchType=single&origin=${encodeURIComponent(depName)}&destination=${encodeURIComponent(arrName)}&outwardDate=${encodeURIComponent(dt)}&outwardDateType=departAfter&passengers%5B%5D=2008-01-01%7C16-25-railcard`;
+    return `https://www.thetrainline.com/book/results?journeySearchType=single&origin=${encodeURIComponent(depName)}&destination=${encodeURIComponent(arrName)}&outwardDate=${encodeURIComponent(dt)}&outwardDateType=departAfter&passengers%5B0%5D=2008-01-01&directSearch=false&selectedTab=train&lang=en`;
   }, [dir, activeStn, planDate, activeTrain, J]);
 
   const rubyTrainlineUrl = useMemo(() => {
     if (isFriday && rubyToTrain) {
       const dt = fmtDate(planDate) + "T" + rubyToTrain.std + ":00";
-      return `https://www.thetrainline.com/book/results?journeySearchType=single&origin=${encodeURIComponent(SCHOOL_STATION)}&destination=${encodeURIComponent(RUBY_STATION)}&outwardDate=${encodeURIComponent(dt)}&outwardDateType=departAfter&passengers%5B%5D=2008-01-01%7C16-25-railcard`;
+      return `https://www.thetrainline.com/book/results?journeySearchType=single&origin=${encodeURIComponent(SCHOOL_STATION)}&destination=${encodeURIComponent(RUBY_STATION)}&outwardDate=${encodeURIComponent(dt)}&outwardDateType=departAfter&passengers%5B0%5D=2008-01-01&directSearch=false&selectedTab=train&lang=en`;
     }
     if (isSunday && rubyFromTrain) {
       const dt = fmtDate(planDate) + "T" + rubyFromTrain.std + ":00";
-      return `https://www.thetrainline.com/book/results?journeySearchType=single&origin=${encodeURIComponent(RUBY_STATION)}&destination=${encodeURIComponent("Godalming")}&outwardDate=${encodeURIComponent(dt)}&outwardDateType=departAfter&passengers%5B%5D=2008-01-01%7C16-25-railcard`;
+      return `https://www.thetrainline.com/book/results?journeySearchType=single&origin=${encodeURIComponent(RUBY_STATION)}&destination=${encodeURIComponent("Godalming")}&outwardDate=${encodeURIComponent(dt)}&outwardDateType=departAfter&passengers%5B0%5D=2008-01-01&directSearch=false&selectedTab=train&lang=en`;
     }
     return null;
   }, [isFriday, isSunday, rubyToTrain, rubyFromTrain, planDate]);
 
   // National Rail live departures URL
   const liveTrainsUrl = useMemo(() => {
-    const depStn = dir === "to" ? (activeStn?.code || "GOD") : SCHOOL_STATION_CODE;
-    const arrStn = dir === "to" ? SCHOOL_STATION_CODE : (activeStn?.code || "GOD");
-    return `https://www.nationalrail.co.uk/live-trains/departures/${depStn}/to/${arrStn}`;
+    const stnSlugs = { GOD: "godalming", FNC: "farncombe", WOK: "woking", SND: "sandhurst" };
+    const depCode = dir === "to" ? (activeStn?.code || "GOD") : SCHOOL_STATION_CODE;
+    const arrCode = dir === "to" ? SCHOOL_STATION_CODE : (activeStn?.code || "GOD");
+    const depSlug = stnSlugs[depCode] || depCode.toLowerCase();
+    const arrSlug = stnSlugs[arrCode] || arrCode.toLowerCase();
+    return `https://www.nationalrail.co.uk/live-trains/departures/${depSlug}/${arrSlug}/`;
   }, [dir, activeStn]);
 
   // Delay Repay detection — check if active train is 15+ min late
