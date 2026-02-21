@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
 // ═══════════════════════════════════════════════════════════════
 // TOM'S TRAVEL COMPANION
@@ -573,12 +573,16 @@ export default function App() {
   // ═══════════════════════════════════════════════════════════
   // WEATHER + BIKE ADJUSTMENTS
   // ═══════════════════════════════════════════════════════════
+  const userLocRef = useRef(userLoc);
+  useEffect(() => { userLocRef.current = userLoc; }, [userLoc]);
+
   const fetchWx = useCallback(async () => {
     setWxError(false);
-    const lat = userLoc?.lat || WX_LAT;
-    const lon = userLoc?.lon || WX_LON;
+    const loc = userLocRef.current;
+    const lat = loc?.lat || WX_LAT;
+    const lon = loc?.lon || WX_LON;
     try { const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_gusts_10m&hourly=temperature_2m,precipitation_probability,weather_code&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_probability_max,weather_code&timezone=Europe/London&forecast_days=7`); setWx(await r.json()); } catch (e) { console.error(e); setWxError(true); }
-  }, [userLoc]);
+  }, []);
 
   const fetchTrains = useCallback(async () => {
     setTrainError(false);
