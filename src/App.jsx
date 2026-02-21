@@ -38,7 +38,7 @@ const BIKE_STN_RUBY = { mi: 1.2, mins: 8 }; // Sandhurst station → Green Lane
 const SUNDAY_LEAVE_RUBY = "19:00"; // Tom aims to leave Ruby's ~7pm Sunday
 
 // ── SAFETY CONTACT ──────────────────────────────────────────
-const SAFETY_CONTACT = "+447000000000"; // Replace with real number
+const SAFETY_CONTACT = "+447512070"; // Andy's number
 const SAFETY_CONTACT_NAME = "Dad";
 
 // ── SWR BIKE RULES ──────────────────────────────────────────
