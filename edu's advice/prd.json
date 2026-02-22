@@ -1,0 +1,2857 @@
+{
+  "name": "toms-travel-companion",
+  "type": "software",
+  "version": "0.4.0",
+  "status": "in-development",
+  "description": "A commuter travel companion web app that helps Tom plan multimodal journeys (bike + train) by combining location input, schedule parsing, and real-time transport intelligence",
+  "created": "2026-02-20",
+  "updated": "2026-02-20T20:00:00Z",
+
+  "prioritizationScheme": {
+    "name": "Simplified WSJF",
+    "formula": "wsjf = (value + urgency) / effort",
+    "scale": "Fibonacci-ish: 1, 2, 3, 5, 8, 13",
+    "reference": "https://scaledagileframework.com/wsjf/",
+    "fields": {
+      "value": "User value if delivered (1=minimal, 13=transformative)",
+      "urgency": "Time criticality / cost of delay (1=can wait, 13=blocking)",
+      "effort": "Implementation effort (1=trivial, 13=massive)"
+    },
+    "interpretation": {
+      "high": "wsjf > 3.0 - Do first, high ROI",
+      "medium": "wsjf 1.0-3.0 - Important but not urgent",
+      "low": "wsjf < 1.0 - Nice to have, do when convenient"
+    }
+  },
+
+  "goals": [
+    {
+      "id": "G1",
+      "name": "MVP - Location Input",
+      "description": "Users can set origin and destination via postcode or geolocation",
+      "status": "active"
+    },
+    {
+      "id": "G2",
+      "name": "Schedule Intelligence",
+      "description": "Users can upload schedules (text or image) and get them parsed by an LLM",
+      "status": "planned"
+    },
+    {
+      "id": "G3",
+      "name": "Transport Search",
+      "description": "Search bike-on-train rules and nearby bike-share availability",
+      "status": "planned"
+    },
+    {
+      "id": "G4",
+      "name": "Daily Intelligence",
+      "description": "Weather, live departures, disruptions, and term awareness create a daily habit loop",
+      "status": "planned"
+    },
+    {
+      "id": "G5",
+      "name": "Budget and Safety",
+      "description": "Cost tracking, safe arrival notifications, delay compensation, and commute stats",
+      "status": "planned"
+    }
+  ],
+
+  "currentState": {
+    "completionPercentage": 10,
+    "assessment": "Basic dark-themed app deployed on Vercel. No core features implemented yet. Dark factory spec complete for all 18 requirements covering Phase 1-6.",
+    "health": "green",
+    "metrics": {
+      "requirementsComplete": "0/18",
+      "deployedTo": "Vercel",
+      "url": "https://toms-travel-companion.vercel.app/",
+      "darkFactoryExtensions": {
+        "entitiesDefined": 18,
+        "executableScenariosDefined": 18,
+        "cxdbRulesTyped": 12,
+        "eventSchemasDefined": 36
+      }
+    }
+  },
+
+  "focus": {
+    "currentGoal": "Implement location input (origin + destination) as the foundational feature",
+    "blockers": [],
+    "nextAction": "Build the PostcodeResolver entity (TTC-001) with validation and geocoding",
+    "successCriteria": "User can set From and To addresses via postcode or geolocation, shown on a map",
+    "wsjfScore": 13.00,
+    "lastCalculated": "2026-02-20T18:00:00Z",
+    "derivedFrom": "manual_2026-02-20_ttc_initial_prioritization"
+  },
+
+  "tokenBudget": {
+    "maxTokensPerGeneration": 4096,
+    "budgetPeriod": "daily",
+    "alertThreshold": 0.8
+  },
+
+  "designDecisions": [
+    {
+      "decision": "Use Vercel for hosting with a frontend-first architecture",
+      "rationale": "Already deployed there; Vercel supports serverless functions for any future API proxy needs; zero-config deploys from git",
+      "alternatives": ["Netlify", "Cloudflare Pages", "Self-hosted"],
+      "tradeoffs": "Vendor lock-in on serverless functions, but acceptable for a personal project"
+    },
+    {
+      "decision": "Use Google Maps API (Places + Geocoding) for location services",
+      "rationale": "Most comprehensive UK postcode coverage, Places Autocomplete for college/POI search, well-documented, generous free tier",
+      "alternatives": ["Apple MapKit JS - requires Apple Developer account", "Mapbox - good but less UK POI coverage", "OpenStreetMap Nominatim - free but rate-limited"],
+      "tradeoffs": "Requires API key management; free tier limited to 28,500 map loads/month"
+    },
+    {
+      "decision": "Use Vercel AI SDK with a supported LLM for schedule parsing",
+      "rationale": "Vercel AI SDK provides a unified interface to multiple LLM providers; simplifies streaming and structured output; works natively with Vercel serverless functions",
+      "alternatives": ["Direct OpenAI API calls", "Anthropic Claude API directly", "Google Gemini API directly"],
+      "tradeoffs": "Adds a dependency layer but provides provider flexibility and simpler error handling"
+    },
+    {
+      "decision": "Use Perplexity API for transport rule searches",
+      "rationale": "Perplexity excels at real-time web search with citations; train operator bike rules change frequently and are spread across many websites",
+      "alternatives": ["Static rules database - would go stale", "Direct web scraping - brittle", "Google Custom Search - less synthesised"],
+      "tradeoffs": "API cost per query; results depend on Perplexity's index freshness"
+    }
+  ],
+
+  "requirements": [
+    {
+      "id": "TTC-001",
+      "title": "Manual postcode entry for origin",
+      "description": "User can type their home postcode into a 'From' input field. The app validates it as a real UK postcode and geocodes it to coordinates for map display and route calculation.",
+      "status": "not-started",
+      "priority": "critical",
+      "prioritization": {
+        "value": 13,
+        "valueRationale": "Foundation for every journey - nothing works without knowing where the user starts",
+        "urgency": 13,
+        "urgencyRationale": "Blocking all other features; first thing users interact with",
+        "effort": 2,
+        "effortRationale": "Standard text input with regex validation + geocoding API call",
+        "wsjf": 13.00
+      },
+      "acceptanceCriteria": [
+        "Input field accepts UK postcodes (e.g. SW1A 1AA, E1 6AN)",
+        "Real-time validation feedback (valid/invalid format)",
+        "On valid postcode, geocode to lat/lng via Google Geocoding API",
+        "Display resolved address below the input for confirmation",
+        "Persist last-used postcode in localStorage"
+      ],
+      "deliverables": [
+        "PostcodeInput component with validation",
+        "Geocoding service module",
+        "localStorage persistence hook"
+      ]
+    },
+    {
+      "id": "TTC-002",
+      "title": "Browser geolocation for origin",
+      "description": "User can click a 'Use my location' button to auto-detect their current position via the browser Geolocation API. The app reverse-geocodes the coordinates to a human-readable address.",
+      "status": "not-started",
+      "priority": "high",
+      "prioritization": {
+        "value": 8,
+        "valueRationale": "Reduces friction significantly - one click vs typing a postcode",
+        "urgency": 8,
+        "urgencyRationale": "Expected UX for any modern location-aware app",
+        "effort": 2,
+        "effortRationale": "Browser Geolocation API is simple; reverse geocoding is one API call",
+        "wsjf": 8.00
+      },
+      "acceptanceCriteria": [
+        "Button triggers browser permission prompt for location access",
+        "On success, reverse-geocode coordinates to postcode/address",
+        "Show loading spinner while acquiring position",
+        "Graceful fallback if permission denied (show manual input)",
+        "Handle GPS timeout (10s max) with user-friendly message",
+        "Works on mobile and desktop browsers"
+      ],
+      "deliverables": [
+        "GeolocationButton component",
+        "useGeolocation custom hook",
+        "Reverse geocoding integration"
+      ]
+    },
+    {
+      "id": "TTC-003",
+      "title": "Manual postcode entry for destination",
+      "description": "User can type their work or college postcode into a 'To' input field. Same validation and geocoding as origin. Supports saving multiple named destinations (e.g. 'College', 'Work').",
+      "status": "not-started",
+      "priority": "critical",
+      "prioritization": {
+        "value": 13,
+        "valueRationale": "Second half of every journey - must know the destination",
+        "urgency": 13,
+        "urgencyRationale": "Blocking route calculation and all downstream features",
+        "effort": 1,
+        "effortRationale": "Reuses PostcodeInput component from TTC-001; trivial once origin is built",
+        "wsjf": 26.00
+      },
+      "acceptanceCriteria": [
+        "Reuses PostcodeInput component from TTC-001",
+        "User can save destination with a label (e.g. 'College', 'Work')",
+        "Saved destinations appear in a dropdown for quick selection",
+        "Persist saved destinations in localStorage"
+      ],
+      "deliverables": [
+        "SavedDestinations component",
+        "Destination management with labels",
+        "localStorage persistence for favourites"
+      ],
+      "note": "Technically highest WSJF due to near-zero marginal effort (reuses TTC-001 component)"
+    },
+    {
+      "id": "TTC-004",
+      "title": "Place autocomplete for destination",
+      "description": "User can type the name of their college, workplace, or any point of interest into the 'To' field and get autocomplete suggestions from Google Places API. Selecting a suggestion auto-fills the address and coordinates.",
+      "status": "not-started",
+      "priority": "high",
+      "prioritization": {
+        "value": 8,
+        "valueRationale": "Major UX improvement - users know their college name but rarely its postcode",
+        "urgency": 5,
+        "urgencyRationale": "Nice to have for MVP but postcode entry covers the base case",
+        "effort": 3,
+        "effortRationale": "Google Places Autocomplete widget integration; needs API key scoping and session tokens for billing",
+        "wsjf": 4.33
+      },
+      "acceptanceCriteria": [
+        "Text input triggers Google Places Autocomplete suggestions as user types",
+        "Suggestions filtered to UK results (componentRestrictions: country: 'gb')",
+        "Biased towards educational institutions and workplaces when possible",
+        "Selecting a suggestion populates address + coordinates",
+        "Session token management for efficient billing",
+        "Fallback to manual postcode if Places API unavailable"
+      ],
+      "deliverables": [
+        "PlaceAutocomplete component wrapping Google Places",
+        "API key configuration with domain restrictions",
+        "Session token hook for billing optimisation"
+      ]
+    },
+    {
+      "id": "TTC-005",
+      "title": "Interactive map display",
+      "description": "Show origin and destination on an interactive map. Display the straight-line connection between them. This provides visual confirmation that the correct locations were entered.",
+      "status": "not-started",
+      "priority": "high",
+      "prioritization": {
+        "value": 8,
+        "valueRationale": "Visual confirmation is essential - users need to see their journey on a map",
+        "urgency": 5,
+        "urgencyRationale": "Not strictly required for functionality but expected UX",
+        "effort": 3,
+        "effortRationale": "Google Maps JS SDK or Mapbox GL; standard integration",
+        "wsjf": 4.33
+      },
+      "acceptanceCriteria": [
+        "Map renders with origin and destination markers",
+        "Auto-zooms to fit both markers",
+        "Markers update in real-time as addresses change",
+        "Responsive - works on mobile and desktop",
+        "Map is optional UI (features work without it loading)"
+      ],
+      "deliverables": [
+        "MapDisplay component",
+        "Marker management for origin/destination",
+        "Auto-fit bounds logic"
+      ]
+    },
+    {
+      "id": "TTC-006",
+      "title": "Text schedule upload and LLM parsing",
+      "description": "User can paste or upload their schedule as plain text (e.g. copied from a college timetable email or document). An LLM parses it into structured day/time/location data that the app can use for journey planning.",
+      "status": "not-started",
+      "priority": "medium",
+      "prioritization": {
+        "value": 8,
+        "valueRationale": "Transforms a static tool into a schedule-aware companion - the core differentiator",
+        "urgency": 3,
+        "urgencyRationale": "Phase 2 feature; location input must work first",
+        "effort": 5,
+        "effortRationale": "Needs LLM API integration, prompt engineering for schedule extraction, structured output parsing",
+        "wsjf": 2.20
+      },
+      "acceptanceCriteria": [
+        "Textarea for pasting schedule text",
+        "File upload accepting .txt, .csv, .ics formats",
+        "LLM extracts: day of week, start time, end time, location/room for each entry",
+        "Parsed schedule displayed in editable table for user correction",
+        "User can confirm or adjust parsed results before saving",
+        "Persist parsed schedule in localStorage",
+        "Handle ambiguous or partial schedules gracefully (ask user to clarify)"
+      ],
+      "deliverables": [
+        "ScheduleUpload component (text + file)",
+        "LLM schedule parsing via Vercel AI SDK",
+        "Structured schedule data model",
+        "Editable schedule table component"
+      ]
+    },
+    {
+      "id": "TTC-007",
+      "title": "Image schedule upload and LLM vision parsing",
+      "description": "User can upload a screenshot or photo of their schedule (e.g. photo of a printed timetable, screenshot of a college portal). An LLM with vision capability extracts the schedule data.",
+      "status": "not-started",
+      "priority": "medium",
+      "prioritization": {
+        "value": 5,
+        "valueRationale": "Convenience feature - most users can copy-paste text more easily than taking screenshots",
+        "urgency": 2,
+        "urgencyRationale": "Phase 2 feature; text parsing (TTC-006) covers the primary use case",
+        "effort": 5,
+        "effortRationale": "Vision API integration, image preprocessing, handling poor quality photos",
+        "wsjf": 1.40
+      },
+      "acceptanceCriteria": [
+        "File upload accepting image formats (PNG, JPG, WEBP)",
+        "Camera capture on mobile devices",
+        "Preview uploaded image before processing",
+        "LLM vision model extracts same structured data as TTC-006",
+        "Results shown in same editable table as text-parsed schedules",
+        "Handle low-quality images gracefully (report confidence, ask for retake)",
+        "Loading state with progress indication during processing"
+      ],
+      "deliverables": [
+        "ImageUpload component with preview",
+        "Vision LLM integration via Vercel AI SDK",
+        "Shared schedule data model (same as TTC-006)",
+        "Mobile camera capture integration"
+      ]
+    },
+    {
+      "id": "TTC-008",
+      "title": "Bike-on-train rules search via Perplexity",
+      "description": "User can search for which types of bikes are allowed on which trains at which times. The app uses Perplexity API to search real-time train operator rules and presents a synthesised answer with citations.",
+      "status": "not-started",
+      "priority": "medium",
+      "prioritization": {
+        "value": 8,
+        "valueRationale": "Core differentiator - no existing app answers 'can I take my bike on this train?'",
+        "urgency": 3,
+        "urgencyRationale": "Phase 3 feature; valuable but not blocking earlier phases",
+        "effort": 5,
+        "effortRationale": "Perplexity API integration, prompt engineering for train-specific queries, citation display",
+        "wsjf": 2.20
+      },
+      "acceptanceCriteria": [
+        "Search input for bike-related transport queries",
+        "Pre-built query templates: 'Can I take a [bike type] on [train operator] at [time]?'",
+        "Auto-populate route's train operators if origin/destination are set",
+        "Perplexity API returns synthesised answer with source citations",
+        "Display answer in readable format with expandable citations",
+        "Cache results for identical queries (1 hour TTL)",
+        "Handle API errors gracefully with fallback message"
+      ],
+      "deliverables": [
+        "BikeRulesSearch component",
+        "Perplexity API integration (via Vercel serverless function)",
+        "Query template builder",
+        "Citation display component",
+        "Result caching layer"
+      ]
+    },
+    {
+      "id": "TTC-009",
+      "title": "Bike-share availability near stations",
+      "description": "Show locations and availability of shared bikes (Lime, Santander Cycles, etc.) near the user's origin, destination, and intermediate stations. Uses public bike-share APIs where available.",
+      "status": "not-started",
+      "priority": "low",
+      "prioritization": {
+        "value": 5,
+        "valueRationale": "Useful for last-mile connectivity but niche - only helps users without their own bike",
+        "urgency": 1,
+        "urgencyRationale": "Phase 3 feature; nice-to-have after core features work",
+        "effort": 5,
+        "effortRationale": "Multiple provider APIs (GBFS standard, Lime API, TfL API); each has different auth and data formats",
+        "wsjf": 1.20
+      },
+      "acceptanceCriteria": [
+        "Display bike-share docking stations near origin and destination on map",
+        "Show real-time availability (bikes available, docks free) where API supports it",
+        "Support at minimum: Santander Cycles (TfL API, London) and one GBFS provider",
+        "Link to provider app for unlocking",
+        "Graceful handling when no bike-share available in area",
+        "Refresh availability on user request"
+      ],
+      "deliverables": [
+        "BikeShareMap component",
+        "TfL Santander Cycles API integration",
+        "GBFS feed parser for generic providers",
+        "Provider availability cards"
+      ],
+      "note": "GBFS (General Bikeshare Feed Specification) is an open standard used by Lime, Tier, and most shared mobility providers"
+    },
+    {
+      "id": "TTC-010",
+      "title": "Journey planner integration",
+      "description": "Combine schedule data with origin/destination to suggest optimal departure times, factoring in bike-on-train rules. This is the capstone feature that ties all phases together.",
+      "status": "not-started",
+      "priority": "low",
+      "prioritization": {
+        "value": 13,
+        "valueRationale": "The ultimate value proposition - a single view of 'when should I leave and how'",
+        "urgency": 1,
+        "urgencyRationale": "Requires all previous features to be functional; true Phase 4",
+        "effort": 8,
+        "effortRationale": "Complex orchestration of schedule, routing, bike rules, and time calculations",
+        "wsjf": 1.75
+      },
+      "acceptanceCriteria": [
+        "For each scheduled event, show recommended departure time",
+        "Factor in: travel time, bike-on-train restrictions, buffer time",
+        "Show alternative routes if primary has bike restrictions",
+        "Daily view showing all journeys for the day",
+        "Push notification for departure reminders (if PWA)"
+      ],
+      "deliverables": [
+        "JourneyPlanner orchestrator",
+        "DailyView component",
+        "Route suggestion algorithm",
+        "Departure time calculator"
+      ]
+    },
+    {
+      "id": "TTC-011",
+      "title": "Weather-aware departure recommendations",
+      "description": "Show current and forecast weather for the departure time window. If rain or wind exceeds cycling thresholds, suggest leaving earlier or taking alternative transport.",
+      "status": "not-started",
+      "priority": "high",
+      "prioritization": {
+        "value": 8,
+        "valueRationale": "Daily utility for cyclists - rain and wind directly affect whether to take the bike",
+        "urgency": 5,
+        "urgencyRationale": "Phase 5 feature; creates daily habit loop once core features exist",
+        "effort": 3,
+        "effortRationale": "Single free API (Open-Meteo), simple UI with icon and temperature, caching logic",
+        "wsjf": 4.33
+      },
+      "acceptanceCriteria": [
+        "Show weather icon and temperature for next 6 hours from current time",
+        "Highlight rain warning when precipitation probability exceeds 60%",
+        "Highlight wind warning when wind speed exceeds 30 km/h",
+        "Show 'Consider walking instead of cycling' advisory when either threshold is breached",
+        "Cache forecast for 30 minutes to avoid hammering the free API",
+        "Works offline using last cached forecast data"
+      ],
+      "deliverables": [
+        "WeatherWidget component",
+        "Open-Meteo API integration module",
+        "30-minute forecast cache",
+        "Cycling advisory logic"
+      ],
+      "apis": [
+        {
+          "name": "Open-Meteo",
+          "endpoint": "https://api.open-meteo.com/v1/forecast",
+          "params": "latitude, longitude, hourly=temperature_2m,precipitation_probability,windspeed_10m,weathercode",
+          "cost": "Free, no API key required"
+        }
+      ]
+    },
+    {
+      "id": "TTC-012",
+      "title": "Live train departures from nearby station",
+      "description": "Show a real-time departure board for Tom's configured home station, with platform, delay, and cancellation information. Auto-refreshes every 60 seconds.",
+      "status": "not-started",
+      "priority": "high",
+      "prioritization": {
+        "value": 8,
+        "valueRationale": "Daily utility - removes need to open a separate app or website for departure board",
+        "urgency": 5,
+        "urgencyRationale": "Integrates with journey planner; creates strong daily engagement",
+        "effort": 3,
+        "effortRationale": "Single API integration with straightforward JSON response",
+        "wsjf": 4.33
+      },
+      "acceptanceCriteria": [
+        "Show next 5 departures from user-configured home station",
+        "Display platform number, scheduled time, and expected time for each departure",
+        "Show delay in minutes when train is running late",
+        "Show cancellation status with reason when available",
+        "Auto-refresh departure data every 60 seconds",
+        "Display 'Last updated HH:MM' timestamp",
+        "Handle station-not-found gracefully with helpful error message"
+      ],
+      "deliverables": [
+        "DepartureBoard component",
+        "Transport API or Realtime Trains API integration",
+        "Auto-refresh interval manager",
+        "Delay and cancellation status display"
+      ],
+      "apis": [
+        {
+          "name": "Transport API",
+          "endpoint": "https://transportapi.com/v3/uk/train/station/{station_code}/live.json",
+          "cost": "Free tier: 1000 requests/day",
+          "note": "Alternatively: Realtime Trains API (realtimetrains.co.uk)"
+        }
+      ]
+    },
+    {
+      "id": "TTC-013",
+      "title": "Service disruption alerts",
+      "description": "Monitor Tom's usual route for planned engineering works and real-time disruptions. Show an alert banner when his route is affected.",
+      "status": "not-started",
+      "priority": "medium",
+      "prioritization": {
+        "value": 5,
+        "valueRationale": "High value when disrupted (saves wasted journeys), zero value otherwise",
+        "urgency": 3,
+        "urgencyRationale": "Phase 5 feature; enhances journey planner but not blocking",
+        "effort": 5,
+        "effortRationale": "Complex route matching across multiple data sources; distinguishing planned vs real-time disruptions",
+        "wsjf": 1.60
+      },
+      "acceptanceCriteria": [
+        "Show disruption banner when Tom's configured route is affected",
+        "Distinguish planned engineering works from real-time disruptions",
+        "Link to National Rail website for full disruption details",
+        "Allow user to dismiss or snooze alert for the session",
+        "Check for disruptions automatically on schedule load"
+      ],
+      "deliverables": [
+        "DisruptionBanner component",
+        "National Rail disruption API integration",
+        "Route-matching logic for user's saved route",
+        "Dismiss/snooze state management"
+      ]
+    },
+    {
+      "id": "TTC-014",
+      "title": "Railcard savings and commute cost tracker",
+      "description": "Track commute costs and show railcard savings. Help Tom understand his transport budget over time.",
+      "status": "not-started",
+      "priority": "medium",
+      "prioritization": {
+        "value": 5,
+        "valueRationale": "Budget awareness is important for a college-age commuter with limited income",
+        "urgency": 2,
+        "urgencyRationale": "Nice to have; does not affect core journey planning",
+        "effort": 3,
+        "effortRationale": "localStorage persistence plus simple arithmetic; no external APIs needed",
+        "wsjf": 2.33
+      },
+      "acceptanceCriteria": [
+        "Allow manual entry of ticket price per journey",
+        "Calculate and display 16-25 Railcard savings (1/3 off)",
+        "Show weekly spend summary",
+        "Show monthly spend summary",
+        "Export journey cost history as CSV",
+        "All data persisted in localStorage; no server required"
+      ],
+      "deliverables": [
+        "CostEntryForm component",
+        "RailcardSavingsCalculator module",
+        "WeeklySummaryCard component",
+        "CSV export utility"
+      ]
+    },
+    {
+      "id": "TTC-015",
+      "title": "Arrived safely notification",
+      "description": "One-tap button that sends a notification to a designated contact confirming Tom has arrived safely at his destination. Andy is building this for his child's friend Tom.",
+      "status": "not-started",
+      "priority": "medium",
+      "prioritization": {
+        "value": 5,
+        "valueRationale": "High emotional value for family/carers; differentiates this app from generic transport tools",
+        "urgency": 3,
+        "urgencyRationale": "Safety feature; strong carer/family use case",
+        "effort": 2,
+        "effortRationale": "Webhook or Web Share API; minimal backend needed",
+        "wsjf": 4.00
+      },
+      "acceptanceCriteria": [
+        "One-tap 'I arrived safely' button prominently displayed on home screen",
+        "Configurable recipient: phone number or email via webhook",
+        "Optional geofence auto-prompt when device is near college location",
+        "Visual confirmation that notification was sent successfully",
+        "Arrival notification history viewable in app"
+      ],
+      "deliverables": [
+        "ArrivedSafelyButton component",
+        "Webhook notification service",
+        "Geofence trigger using browser Geolocation API",
+        "Notification history log in localStorage"
+      ]
+    },
+    {
+      "id": "TTC-016",
+      "title": "College term date awareness",
+      "description": "Store college term dates so the app knows when Tom is not expected to commute. Show a 'No college today' banner during holidays and weekends to suppress irrelevant departure information.",
+      "status": "not-started",
+      "priority": "low",
+      "prioritization": {
+        "value": 3,
+        "valueRationale": "Prevents irrelevant data on non-college days; quality of life improvement",
+        "urgency": 2,
+        "urgencyRationale": "Low urgency but trivial effort; high WSJF ratio",
+        "effort": 1,
+        "effortRationale": "Date checking logic against stored term dates; auto-detect weekends and bank holidays",
+        "wsjf": 5.00
+      },
+      "acceptanceCriteria": [
+        "Manual entry of term start/end dates and half-term breaks",
+        "Auto-detect weekends as non-college days",
+        "Auto-detect UK bank holidays using gov.uk API",
+        "Show 'No college today' banner when current date is outside term",
+        "Suppress departure recommendations and live board during non-term periods",
+        "Persist term dates in localStorage"
+      ],
+      "deliverables": [
+        "TermCalendarEditor component",
+        "TermStatusBanner component",
+        "UK bank holiday detection via gov.uk JSON feed",
+        "Term date persistence in localStorage"
+      ],
+      "apis": [
+        {
+          "name": "UK Bank Holidays API",
+          "endpoint": "https://www.gov.uk/bank-holidays.json",
+          "cost": "Free, no API key required"
+        }
+      ]
+    },
+    {
+      "id": "TTC-017",
+      "title": "Delay Repay helper",
+      "description": "Detect when a scheduled train was 15 or more minutes late and prompt Tom to log a Delay Repay compensation claim, pre-filling journey details and linking to the correct operator claim page.",
+      "status": "not-started",
+      "priority": "low",
+      "prioritization": {
+        "value": 5,
+        "valueRationale": "Saves real money; many commuters miss out on compensation they are entitled to",
+        "urgency": 1,
+        "urgencyRationale": "Occasional use feature; only relevant when delays occur",
+        "effort": 5,
+        "effortRationale": "Complex: delay detection from live departure data, form pre-fill, operator routing logic",
+        "wsjf": 1.20
+      },
+      "acceptanceCriteria": [
+        "Detect when a scheduled departure was 15 or more minutes late using live departure data",
+        "Prompt user to log a Delay Repay claim for the affected journey",
+        "Pre-fill claim details: date, origin station, destination, scheduled time, actual time",
+        "Link to the correct operator's Delay Repay claim page",
+        "Track claim status: submitted, pending, received"
+      ],
+      "deliverables": [
+        "DelayDetector module integrated with LiveDepartureBoard",
+        "DelayRepayClaimForm component",
+        "Operator claim URL directory",
+        "ClaimStatusTracker with localStorage persistence"
+      ]
+    },
+    {
+      "id": "TTC-018",
+      "title": "Commute stats and CO2 savings",
+      "description": "Track commute patterns, distance cycled, and CO2 saved versus driving. Show streak counters and a shareable weekly summary.",
+      "status": "not-started",
+      "priority": "low",
+      "prioritization": {
+        "value": 3,
+        "valueRationale": "Social and motivational value; gamification encourages cycling habit",
+        "urgency": 1,
+        "urgencyRationale": "Lowest priority; delight feature only useful once core journeys are tracked",
+        "effort": 2,
+        "effortRationale": "Simple calculations from existing journey data; no new APIs needed",
+        "wsjf": 2.00
+      },
+      "acceptanceCriteria": [
+        "Track number of days commuted per week and per month",
+        "Calculate cycling distance from origin-to-station route",
+        "Estimate CO2 saved versus equivalent car journey using standard UK emission factors",
+        "Show cycling streak counter (e.g. '5-day cycling streak!')",
+        "Generate shareable weekly summary (image or text)",
+        "All calculations based on data already collected in app; no new inputs required"
+      ],
+      "deliverables": [
+        "CommuteStatsCard component",
+        "StreakCounter component",
+        "CO2SavingsCalculator module",
+        "WeeklySummaryShare component"
+      ]
+    }
+  ],
+
+  "executionOrder": {
+    "description": "All 18 requirements ordered by WSJF score, with dependency constraints applied. TTC-001 promoted to rank 1 because TTC-003 (highest raw WSJF) depends on it. TTC-016 promoted to rank 4 due to trivial effort and high WSJF ratio.",
+    "order": [
+      {
+        "rank": 1,
+        "id": "TTC-001",
+        "wsjf": 13.00,
+        "rationale": "Foundation component; must be built first to unblock TTC-003",
+        "dependencyConstraintApplied": true
+      },
+      {
+        "rank": 2,
+        "id": "TTC-003",
+        "wsjf": 26.00,
+        "rationale": "Highest raw WSJF; near-zero marginal effort once TTC-001 exists",
+        "dependencyConstraintApplied": true
+      },
+      {
+        "rank": 3,
+        "id": "TTC-002",
+        "wsjf": 8.00,
+        "rationale": "High-value UX improvement, low effort, no blocking dependencies"
+      },
+      {
+        "rank": 4,
+        "id": "TTC-016",
+        "wsjf": 5.00,
+        "rationale": "Highest WSJF after top three; trivial effort (date logic only); prevents irrelevant data from day one"
+      },
+      {
+        "rank": 5,
+        "id": "TTC-004",
+        "wsjf": 4.33,
+        "rationale": "Places Autocomplete enhances destination input significantly"
+      },
+      {
+        "rank": 6,
+        "id": "TTC-005",
+        "wsjf": 4.33,
+        "rationale": "Map display provides visual confirmation; same WSJF as TTC-004, can develop in parallel"
+      },
+      {
+        "rank": 7,
+        "id": "TTC-011",
+        "wsjf": 4.33,
+        "rationale": "Weather advisory; same WSJF as TTC-004/005; creates daily habit loop for cyclists"
+      },
+      {
+        "rank": 8,
+        "id": "TTC-012",
+        "wsjf": 4.33,
+        "rationale": "Live departures; same WSJF; daily engagement feature; can develop in parallel with TTC-011"
+      },
+      {
+        "rank": 9,
+        "id": "TTC-015",
+        "wsjf": 4.00,
+        "rationale": "Arrived safely notification; near-top WSJF; high emotional value, low effort"
+      },
+      {
+        "rank": 10,
+        "id": "TTC-014",
+        "wsjf": 2.33,
+        "rationale": "Cost tracker; medium WSJF; localStorage-only, no external dependencies"
+      },
+      {
+        "rank": 11,
+        "id": "TTC-006",
+        "wsjf": 2.20,
+        "rationale": "Phase 2 begins - schedule parsing is the core differentiator"
+      },
+      {
+        "rank": 12,
+        "id": "TTC-008",
+        "wsjf": 2.20,
+        "rationale": "Same WSJF as TTC-006 but independent; can develop in parallel"
+      },
+      {
+        "rank": 13,
+        "id": "TTC-018",
+        "wsjf": 2.00,
+        "rationale": "Commute stats; delight feature; depends on journey data from earlier features"
+      },
+      {
+        "rank": 14,
+        "id": "TTC-010",
+        "wsjf": 1.75,
+        "rationale": "Capstone journey planner; depends on TTC-006 + TTC-008 being complete"
+      },
+      {
+        "rank": 15,
+        "id": "TTC-013",
+        "wsjf": 1.60,
+        "rationale": "Disruption alerts; complex multi-source route matching; high effort for intermittent value"
+      },
+      {
+        "rank": 16,
+        "id": "TTC-007",
+        "wsjf": 1.40,
+        "rationale": "Vision schedule parsing is a nice-to-have variant of TTC-006"
+      },
+      {
+        "rank": 17,
+        "id": "TTC-009",
+        "wsjf": 1.20,
+        "rationale": "Bike-share availability; multiple API integrations for a niche use case"
+      },
+      {
+        "rank": 18,
+        "id": "TTC-017",
+        "wsjf": 1.20,
+        "rationale": "Delay Repay helper; same WSJF as TTC-009; occasional use, complex operator routing"
+      }
+    ],
+    "totalEstimatedEffort": "57 story points (Fibonacci)"
+  },
+
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "Location Input",
+      "description": "Users can set origin and destination via postcode, geolocation, or place search. Map displays both points.",
+      "status": "pending",
+      "tasks": [
+        {"task": "TTC-001", "status": "not-started"},
+        {"task": "TTC-002", "status": "not-started"},
+        {"task": "TTC-003", "status": "not-started"},
+        {"task": "TTC-004", "status": "not-started"},
+        {"task": "TTC-005", "status": "not-started"}
+      ]
+    },
+    {
+      "id": "phase-2",
+      "name": "Schedule Intelligence",
+      "description": "Users can upload schedules as text or images. LLM extracts structured timetable data.",
+      "status": "pending",
+      "tasks": [
+        {"task": "TTC-006", "status": "not-started"},
+        {"task": "TTC-007", "status": "not-started"}
+      ]
+    },
+    {
+      "id": "phase-3",
+      "name": "Transport Search",
+      "description": "Search bike-on-train rules and find nearby bike-share availability.",
+      "status": "pending",
+      "tasks": [
+        {"task": "TTC-008", "status": "not-started"},
+        {"task": "TTC-009", "status": "not-started"}
+      ]
+    },
+    {
+      "id": "phase-4",
+      "name": "Journey Orchestration",
+      "description": "Combine all data sources into a unified journey planner with departure recommendations.",
+      "status": "pending",
+      "tasks": [
+        {"task": "TTC-010", "status": "not-started"}
+      ]
+    },
+    {
+      "id": "phase-5",
+      "name": "Daily Intelligence",
+      "description": "Weather advisories, live departure boards, disruption alerts, and term date awareness to create a daily habit loop.",
+      "status": "pending",
+      "tasks": [
+        {"task": "TTC-011", "status": "not-started"},
+        {"task": "TTC-012", "status": "not-started"},
+        {"task": "TTC-013", "status": "not-started"},
+        {"task": "TTC-016", "status": "not-started"}
+      ]
+    },
+    {
+      "id": "phase-6",
+      "name": "Budget and Safety",
+      "description": "Commute cost tracking with railcard savings, arrived safely notifications, Delay Repay claim helper, and commute stats.",
+      "status": "pending",
+      "tasks": [
+        {"task": "TTC-014", "status": "not-started"},
+        {"task": "TTC-015", "status": "not-started"},
+        {"task": "TTC-017", "status": "not-started"},
+        {"task": "TTC-018", "status": "not-started"}
+      ]
+    }
+  ],
+
+  "risks": [
+    {
+      "id": "RISK-001",
+      "description": "Google Maps API costs could exceed free tier if app gets popular",
+      "likelihood": 0.3,
+      "impact": 0.6,
+      "expectedImpact": 0.18,
+      "mitigation": "Set up billing alerts; implement client-side caching; consider Mapbox as cheaper alternative for map tiles"
+    },
+    {
+      "id": "RISK-002",
+      "description": "LLM schedule parsing may produce inconsistent results across different timetable formats",
+      "likelihood": 0.5,
+      "impact": 0.5,
+      "expectedImpact": 0.25,
+      "mitigation": "Require user confirmation of parsed results; provide editable table for corrections; test with diverse schedule formats"
+    },
+    {
+      "id": "RISK-003",
+      "description": "Perplexity API may return outdated or inaccurate bike-on-train rules",
+      "likelihood": 0.4,
+      "impact": 0.7,
+      "expectedImpact": 0.28,
+      "mitigation": "Always display source citations so users can verify; add disclaimer about checking operator website; cache results with short TTL"
+    },
+    {
+      "id": "RISK-004",
+      "description": "Bike-share APIs may require commercial agreements or have restrictive rate limits",
+      "likelihood": 0.5,
+      "impact": 0.4,
+      "expectedImpact": 0.20,
+      "mitigation": "Start with open GBFS feeds (Santander Cycles via TfL); add providers incrementally; fallback to linking to provider apps"
+    },
+    {
+      "id": "RISK-005",
+      "description": "Transport API free tier (1000 requests/day) may be insufficient if live departure board refreshes every 60 seconds across multiple active sessions",
+      "likelihood": 0.4,
+      "impact": 0.5,
+      "expectedImpact": 0.20,
+      "mitigation": "Implement per-session rate limiting; pause refresh when tab is not visible (Page Visibility API); evaluate Realtime Trains API as alternative; consider 90-second refresh interval to reduce request volume"
+    },
+    {
+      "id": "RISK-006",
+      "description": "Geofence auto-prompt for 'arrived safely' requires background location permission, which users and browsers increasingly restrict for privacy reasons",
+      "likelihood": 0.6,
+      "impact": 0.3,
+      "expectedImpact": 0.18,
+      "mitigation": "Make geofence strictly opt-in with clear explanation; fall back gracefully to manual one-tap button if permission is denied; never require location permission for core features"
+    }
+  ],
+
+  "dependencies": {
+    "runtime": {
+      "node": ">=18",
+      "packages": [
+        "next or react (framework TBD based on existing setup)",
+        "tailwindcss (styling)",
+        "@vercel/ai (Vercel AI SDK for LLM integration)"
+      ]
+    },
+    "external": [
+      {
+        "name": "Google Maps Platform",
+        "apis": ["Geocoding API", "Places API", "Maps JavaScript API"],
+        "purpose": "Postcode geocoding, place autocomplete, map display",
+        "freeQuota": "28,500 map loads/month; $200 monthly credit"
+      },
+      {
+        "name": "Perplexity API",
+        "purpose": "Real-time web search for bike-on-train rules",
+        "note": "Requires API key from perplexity.ai"
+      },
+      {
+        "name": "LLM Provider (via Vercel AI SDK)",
+        "purpose": "Schedule text/image parsing",
+        "options": ["OpenAI GPT-4o (vision + text)", "Anthropic Claude (vision + text)", "Google Gemini (vision + text)"],
+        "note": "Any provider supporting vision and structured output works"
+      },
+      {
+        "name": "TfL Unified API",
+        "purpose": "Santander Cycles availability",
+        "freeQuota": "500 requests/minute",
+        "note": "Free, no auth required for bike point data"
+      },
+      {
+        "name": "GBFS Feeds",
+        "purpose": "Generic bike-share availability (Lime, Tier, etc.)",
+        "note": "Open standard; feed URLs vary by city and provider"
+      },
+      {
+        "name": "Open-Meteo",
+        "purpose": "Weather forecast for cycling advisory (TTC-011)",
+        "endpoint": "https://api.open-meteo.com/v1/forecast",
+        "freeQuota": "Unlimited, no API key required",
+        "note": "Free and open-source weather API; no registration needed"
+      },
+      {
+        "name": "Transport API / Realtime Trains API",
+        "purpose": "Live departure board for nearby station (TTC-012, TTC-013, TTC-017)",
+        "freeQuota": "Transport API: 1000 requests/day free tier",
+        "note": "Realtime Trains (realtimetrains.co.uk) is an alternative with more generous free tier for enthusiast/personal use"
+      },
+      {
+        "name": "UK Bank Holidays API",
+        "purpose": "Auto-detect bank holidays for term calendar (TTC-016)",
+        "endpoint": "https://www.gov.uk/bank-holidays.json",
+        "freeQuota": "Unlimited, no API key required",
+        "note": "Official UK government data; returns England/Wales, Scotland, and Northern Ireland separately"
+      }
+    ]
+  },
+
+  "nextActions": [
+    {
+      "task": "Inspect the existing codebase to determine current framework and file structure",
+      "priority": "critical",
+      "owner": "Andy",
+      "status": "pending"
+    },
+    {
+      "task": "Set up Google Maps API key with domain restrictions for the Vercel deployment",
+      "priority": "high",
+      "owner": "Andy",
+      "status": "pending"
+    },
+    {
+      "task": "Build TTC-001 (PostcodeResolver entity) as the first feature",
+      "priority": "high",
+      "owner": "Claude Code",
+      "status": "pending"
+    }
+  ],
+
+  "entities": [
+    {
+      "name": "PostcodeResolver",
+      "type": "agent",
+      "description": "Validates UK postcodes and geocodes them to coordinates via Google Geocoding API. Manages the 'From' address input state.",
+      "requirementId": "TTC-001",
+      "stateSchema": {
+        "rawInput": {"type": "string", "description": "User-typed postcode text", "required": true, "default": ""},
+        "isValid": {"type": "boolean", "description": "Whether rawInput matches UK postcode regex", "default": false},
+        "postcode": {"type": "string", "description": "Normalised postcode (uppercase, spaced)", "default": ""},
+        "address": {"type": "string", "description": "Human-readable resolved address from geocoding", "default": ""},
+        "lat": {"type": "float", "description": "Latitude from geocoding"},
+        "lng": {"type": "float", "description": "Longitude from geocoding"},
+        "status": {"type": "atom", "description": "Current resolution state", "enum": ["idle", "validating", "geocoding", "resolved", "error"], "default": "idle"},
+        "error": {"type": "string", "description": "Error message if geocoding failed", "default": ""}
+      },
+      "behaviours": [
+        {
+          "name": "validate_postcode",
+          "description": "Check rawInput against UK postcode regex pattern",
+          "callType": "call",
+          "inputs": [{"name": "rawInput", "type": "string", "description": "User-typed postcode"}],
+          "outputs": [{"name": "isValid", "type": "boolean", "description": "Whether postcode format is valid"}],
+          "llmInvolved": false,
+          "emitsEvents": ["PostcodeValidated"],
+          "cxdbGuards": ["RULE-002"]
+        },
+        {
+          "name": "geocode_postcode",
+          "description": "Call Google Geocoding API to resolve postcode to lat/lng and address",
+          "callType": "call",
+          "inputs": [{"name": "postcode", "type": "string", "description": "Validated UK postcode"}],
+          "outputs": [{"name": "lat", "type": "float"}, {"name": "lng", "type": "float"}, {"name": "address", "type": "string"}],
+          "llmInvolved": false,
+          "emitsEvents": ["PostcodeResolved"],
+          "cxdbGuards": ["RULE-006"]
+        },
+        {
+          "name": "persist_to_storage",
+          "description": "Save resolved location to localStorage for session persistence",
+          "callType": "cast",
+          "inputs": [{"name": "location", "type": "map", "description": "Location object to persist"}],
+          "outputs": [],
+          "llmInvolved": false,
+          "emitsEvents": []
+        }
+      ],
+      "eventsEmitted": ["PostcodeValidated", "PostcodeResolved", "LocationError"],
+      "supervision": {
+        "strategy": "one_for_one",
+        "maxRestarts": 3,
+        "maxSeconds": 60
+      }
+    },
+    {
+      "name": "GeolocationService",
+      "type": "agent",
+      "description": "Acquires user position via browser Geolocation API and reverse-geocodes to a postcode/address.",
+      "requirementId": "TTC-002",
+      "stateSchema": {
+        "permissionStatus": {"type": "atom", "description": "Browser permission state", "enum": ["prompt", "granted", "denied"], "default": "prompt"},
+        "acquiring": {"type": "boolean", "description": "Whether currently acquiring position", "default": false},
+        "lat": {"type": "float", "description": "Acquired latitude"},
+        "lng": {"type": "float", "description": "Acquired longitude"},
+        "accuracy": {"type": "float", "description": "Position accuracy in metres"},
+        "resolvedAddress": {"type": "string", "description": "Reverse-geocoded address", "default": ""},
+        "resolvedPostcode": {"type": "string", "description": "Reverse-geocoded postcode", "default": ""},
+        "error": {"type": "string", "description": "Error message", "default": ""}
+      },
+      "behaviours": [
+        {
+          "name": "acquire_position",
+          "description": "Request current position from browser Geolocation API with 10s timeout",
+          "callType": "call",
+          "inputs": [],
+          "outputs": [{"name": "lat", "type": "float"}, {"name": "lng", "type": "float"}, {"name": "accuracy", "type": "float"}],
+          "llmInvolved": false,
+          "emitsEvents": ["GeolocationAcquired", "LocationError"],
+          "cxdbGuards": ["RULE-005"]
+        },
+        {
+          "name": "reverse_geocode",
+          "description": "Convert coordinates to human-readable address via Google Geocoding API",
+          "callType": "call",
+          "inputs": [{"name": "lat", "type": "float"}, {"name": "lng", "type": "float"}],
+          "outputs": [{"name": "address", "type": "string"}, {"name": "postcode", "type": "string"}],
+          "llmInvolved": false,
+          "emitsEvents": ["PostcodeResolved"],
+          "cxdbGuards": ["RULE-006"]
+        }
+      ],
+      "eventsEmitted": ["GeolocationAcquired", "PostcodeResolved", "LocationError"],
+      "supervision": {
+        "strategy": "one_for_one",
+        "maxRestarts": 1,
+        "maxSeconds": 30
+      }
+    },
+    {
+      "name": "DestinationManager",
+      "type": "agent",
+      "description": "Manages saved destinations with labels. Persists to localStorage. Provides dropdown selection for quick access.",
+      "requirementId": "TTC-003",
+      "stateSchema": {
+        "destinations": {"type": "list", "description": "Array of saved destination objects", "itemType": "map", "default": []},
+        "activeDestination": {"type": "map", "description": "Currently selected destination"},
+        "editingLabel": {"type": "string", "description": "Label being edited", "default": ""}
+      },
+      "behaviours": [
+        {
+          "name": "save_destination",
+          "description": "Save a resolved location with a user-defined label",
+          "callType": "call",
+          "inputs": [{"name": "location", "type": "map"}, {"name": "label", "type": "string"}],
+          "outputs": [{"name": "destinationId", "type": "string"}],
+          "llmInvolved": false,
+          "emitsEvents": ["DestinationSaved"]
+        },
+        {
+          "name": "select_destination",
+          "description": "Set a saved destination as the active To location",
+          "callType": "call",
+          "inputs": [{"name": "destinationId", "type": "string"}],
+          "outputs": [{"name": "location", "type": "map"}],
+          "llmInvolved": false,
+          "emitsEvents": ["DestinationSelected"]
+        },
+        {
+          "name": "delete_destination",
+          "description": "Remove a saved destination by ID",
+          "callType": "cast",
+          "inputs": [{"name": "destinationId", "type": "string"}],
+          "outputs": [],
+          "llmInvolved": false,
+          "emitsEvents": ["DestinationDeleted"]
+        }
+      ],
+      "eventsEmitted": ["DestinationSaved", "DestinationSelected", "DestinationDeleted"],
+      "supervision": {
+        "strategy": "one_for_one",
+        "maxRestarts": 3,
+        "maxSeconds": 60
+      }
+    },
+    {
+      "name": "PlaceAutocompleteService",
+      "type": "agent",
+      "description": "Wraps Google Places Autocomplete API for searching colleges, workplaces, and POIs by name. Manages session tokens for billing efficiency.",
+      "requirementId": "TTC-004",
+      "stateSchema": {
+        "query": {"type": "string", "description": "Current search text", "default": ""},
+        "suggestions": {"type": "list", "description": "Array of place suggestion objects", "itemType": "map", "default": []},
+        "sessionToken": {"type": "string", "description": "Google Places session token for billing"},
+        "selectedPlace": {"type": "map", "description": "Currently selected place with coordinates"},
+        "loading": {"type": "boolean", "description": "Whether suggestions are loading", "default": false}
+      },
+      "behaviours": [
+        {
+          "name": "fetch_suggestions",
+          "description": "Query Google Places Autocomplete with UK country restriction",
+          "callType": "call",
+          "inputs": [{"name": "query", "type": "string"}],
+          "outputs": [{"name": "suggestions", "type": "list"}],
+          "llmInvolved": false,
+          "emitsEvents": ["PlaceSuggestionsLoaded"],
+          "cxdbGuards": ["RULE-001", "RULE-006"]
+        },
+        {
+          "name": "select_place",
+          "description": "Resolve a selected suggestion to full address and coordinates",
+          "callType": "call",
+          "inputs": [{"name": "placeId", "type": "string"}],
+          "outputs": [{"name": "address", "type": "string"}, {"name": "lat", "type": "float"}, {"name": "lng", "type": "float"}],
+          "llmInvolved": false,
+          "emitsEvents": ["PlaceSelected"]
+        }
+      ],
+      "eventsEmitted": ["PlaceSuggestionsLoaded", "PlaceSelected"],
+      "supervision": {
+        "strategy": "one_for_one",
+        "maxRestarts": 3,
+        "maxSeconds": 60
+      }
+    },
+    {
+      "name": "MapRenderer",
+      "type": "agent",
+      "description": "Manages the interactive map display with origin/destination markers and auto-fit bounds.",
+      "requirementId": "TTC-005",
+      "stateSchema": {
+        "originMarker": {"type": "map", "description": "Origin marker position {lat, lng}"},
+        "destinationMarker": {"type": "map", "description": "Destination marker position {lat, lng}"},
+        "bounds": {"type": "map", "description": "Current map bounds"},
+        "mapLoaded": {"type": "boolean", "description": "Whether the map SDK has loaded", "default": false}
+      },
+      "behaviours": [
+        {
+          "name": "update_markers",
+          "description": "Set or update origin and/or destination markers on the map",
+          "callType": "cast",
+          "inputs": [{"name": "origin", "type": "map"}, {"name": "destination", "type": "map"}],
+          "outputs": [],
+          "llmInvolved": false,
+          "emitsEvents": ["MapMarkersUpdated"]
+        },
+        {
+          "name": "fit_bounds",
+          "description": "Auto-zoom map to fit both markers with padding",
+          "callType": "cast",
+          "inputs": [],
+          "outputs": [],
+          "llmInvolved": false,
+          "emitsEvents": []
+        }
+      ],
+      "eventsEmitted": ["MapMarkersUpdated"],
+      "supervision": {
+        "strategy": "one_for_one",
+        "maxRestarts": 1,
+        "maxSeconds": 30
+      }
+    },
+    {
+      "name": "ScheduleTextParser",
+      "type": "task",
+      "description": "Parses plain text schedules into structured ScheduleEntry objects via LLM. Runs as a one-shot serverless function.",
+      "requirementId": "TTC-006",
+      "stateSchema": {
+        "rawText": {"type": "string", "description": "User-provided schedule text", "required": true},
+        "parsedEntries": {"type": "list", "description": "Array of parsed ScheduleEntry objects", "itemType": "map", "default": []},
+        "parseStatus": {"type": "atom", "description": "Parsing state", "enum": ["idle", "parsing", "parsed", "confirmed", "error"], "default": "idle"},
+        "confidence": {"type": "atom", "description": "Overall parse confidence", "enum": ["high", "medium", "low"]},
+        "userEdits": {"type": "list", "description": "User corrections applied to parsed entries", "itemType": "map", "default": []}
+      },
+      "behaviours": [
+        {
+          "name": "parse_text",
+          "description": "Send schedule text to LLM for structured extraction",
+          "callType": "call",
+          "inputs": [{"name": "text", "type": "string", "description": "Raw schedule text"}],
+          "outputs": [{"name": "entries", "type": "list"}, {"name": "confidence", "type": "atom"}],
+          "llmInvolved": true,
+          "llmPromptTemplate": "schedule_text_extraction",
+          "emitsEvents": ["ScheduleTextParsed"],
+          "cxdbGuards": ["RULE-003", "RULE-008"]
+        },
+        {
+          "name": "confirm_schedule",
+          "description": "User confirms parsed schedule (with optional edits)",
+          "callType": "call",
+          "inputs": [{"name": "entries", "type": "list"}, {"name": "edits", "type": "list"}],
+          "outputs": [{"name": "confirmedEntries", "type": "list"}],
+          "llmInvolved": false,
+          "emitsEvents": ["ScheduleConfirmed"]
+        }
+      ],
+      "eventsEmitted": ["ScheduleTextParsed", "ScheduleConfirmed", "LLMParsingError"],
+      "supervision": {
+        "strategy": "one_for_one",
+        "maxRestarts": 2,
+        "maxSeconds": 30
+      },
+      "tokenBudget": {
+        "maxTokensPerGeneration": 4096,
+        "budgetPeriod": "daily",
+        "alertThreshold": 0.8
+      }
+    },
+    {
+      "name": "ScheduleImageParser",
+      "type": "task",
+      "description": "Parses schedule images/photos into structured ScheduleEntry objects via LLM vision. Shares output format with ScheduleTextParser.",
+      "requirementId": "TTC-007",
+      "stateSchema": {
+        "imageData": {"type": "string", "description": "Base64-encoded image data", "required": true},
+        "imagePreviewUrl": {"type": "string", "description": "Object URL for image preview"},
+        "parsedEntries": {"type": "list", "description": "Array of parsed ScheduleEntry objects", "itemType": "map", "default": []},
+        "parseStatus": {"type": "atom", "description": "Parsing state", "enum": ["idle", "uploading", "parsing", "parsed", "confirmed", "error"], "default": "idle"},
+        "confidence": {"type": "atom", "description": "Overall parse confidence", "enum": ["high", "medium", "low"]}
+      },
+      "behaviours": [
+        {
+          "name": "parse_image",
+          "description": "Send schedule image to LLM vision model for structured extraction",
+          "callType": "call",
+          "inputs": [{"name": "imageBase64", "type": "string", "description": "Base64-encoded image"}],
+          "outputs": [{"name": "entries", "type": "list"}, {"name": "confidence", "type": "atom"}],
+          "llmInvolved": true,
+          "llmPromptTemplate": "schedule_image_extraction",
+          "emitsEvents": ["ScheduleImageParsed"],
+          "cxdbGuards": ["RULE-003", "RULE-008"]
+        }
+      ],
+      "eventsEmitted": ["ScheduleImageParsed", "ScheduleConfirmed", "LLMParsingError"],
+      "supervision": {
+        "strategy": "one_for_one",
+        "maxRestarts": 1,
+        "maxSeconds": 60
+      },
+      "tokenBudget": {
+        "maxTokensPerGeneration": 8192,
+        "budgetPeriod": "daily",
+        "alertThreshold": 0.8
+      }
+    },
+    {
+      "name": "BikeRulesSearcher",
+      "type": "task",
+      "description": "Searches for bike-on-train rules via Perplexity API. Caches results. Displays synthesised answers with citations.",
+      "requirementId": "TTC-008",
+      "stateSchema": {
+        "query": {"type": "string", "description": "User's bike rules search query", "default": ""},
+        "bikeType": {"type": "string", "description": "Type of bike (folding, standard, e-bike)", "default": ""},
+        "trainOperator": {"type": "string", "description": "Train operating company", "default": ""},
+        "travelTime": {"type": "string", "description": "Time of travel", "default": ""},
+        "answer": {"type": "string", "description": "Synthesised answer text", "default": ""},
+        "citations": {"type": "list", "description": "Source URLs with titles", "itemType": "map", "default": []},
+        "searchStatus": {"type": "atom", "description": "Search state", "enum": ["idle", "searching", "complete", "error"], "default": "idle"},
+        "cachedAt": {"type": "datetime", "description": "When result was cached"}
+      },
+      "behaviours": [
+        {
+          "name": "search_bike_rules",
+          "description": "Build query from template and search via Perplexity API",
+          "callType": "call",
+          "inputs": [{"name": "bikeType", "type": "string"}, {"name": "trainOperator", "type": "string"}, {"name": "travelTime", "type": "string"}],
+          "outputs": [{"name": "answer", "type": "string"}, {"name": "citations", "type": "list"}],
+          "llmInvolved": true,
+          "llmPromptTemplate": "bike_rules_search",
+          "emitsEvents": ["BikeRulesSearchCompleted"],
+          "cxdbGuards": ["RULE-004", "RULE-006", "RULE-007"]
+        },
+        {
+          "name": "check_cache",
+          "description": "Check if an identical query has a cached result within TTL",
+          "callType": "call",
+          "inputs": [{"name": "queryHash", "type": "string"}],
+          "outputs": [{"name": "cachedResult", "type": "map"}, {"name": "hit", "type": "boolean"}],
+          "llmInvolved": false,
+          "emitsEvents": []
+        }
+      ],
+      "eventsEmitted": ["BikeRulesSearchCompleted"],
+      "supervision": {
+        "strategy": "one_for_one",
+        "maxRestarts": 2,
+        "maxSeconds": 30
+      },
+      "tokenBudget": {
+        "maxTokensPerGeneration": 2048,
+        "budgetPeriod": "daily",
+        "alertThreshold": 0.8
+      }
+    },
+    {
+      "name": "BikeShareProvider",
+      "type": "agent",
+      "description": "Fetches bike-share availability from TfL and GBFS feeds. Aggregates results from multiple providers.",
+      "requirementId": "TTC-009",
+      "stateSchema": {
+        "stations": {"type": "list", "description": "Array of BikeShareStation objects", "itemType": "map", "default": []},
+        "searchRadius": {"type": "integer", "description": "Search radius in metres", "default": 500},
+        "providers": {"type": "list", "description": "Active provider names", "itemType": "string", "default": ["santander"]},
+        "fetchStatus": {"type": "atom", "description": "Fetch state", "enum": ["idle", "fetching", "loaded", "error"], "default": "idle"},
+        "lastFetched": {"type": "datetime", "description": "When availability was last refreshed"}
+      },
+      "behaviours": [
+        {
+          "name": "fetch_nearby_stations",
+          "description": "Fetch bike-share stations near a given coordinate from all active providers",
+          "callType": "call",
+          "inputs": [{"name": "lat", "type": "float"}, {"name": "lng", "type": "float"}, {"name": "radius", "type": "integer"}],
+          "outputs": [{"name": "stations", "type": "list"}],
+          "llmInvolved": false,
+          "emitsEvents": ["BikeShareFetched"],
+          "cxdbGuards": ["RULE-006"]
+        },
+        {
+          "name": "refresh_availability",
+          "description": "Re-fetch availability for currently loaded stations",
+          "callType": "call",
+          "inputs": [],
+          "outputs": [{"name": "stations", "type": "list"}],
+          "llmInvolved": false,
+          "emitsEvents": ["BikeShareFetched"]
+        }
+      ],
+      "eventsEmitted": ["BikeShareFetched"],
+      "supervision": {
+        "strategy": "one_for_one",
+        "maxRestarts": 3,
+        "maxSeconds": 60
+      }
+    },
+    {
+      "name": "JourneyOrchestrator",
+      "type": "agent",
+      "description": "Combines schedule, location, and bike rules data to generate optimal departure recommendations. Capstone entity tying all phases together.",
+      "requirementId": "TTC-010",
+      "stateSchema": {
+        "origin": {"type": "map", "description": "Resolved origin location"},
+        "destination": {"type": "map", "description": "Resolved destination location"},
+        "schedule": {"type": "list", "description": "Confirmed schedule entries", "itemType": "map", "default": []},
+        "bikeRules": {"type": "map", "description": "Cached bike rules for this route"},
+        "journeyPlans": {"type": "list", "description": "Array of computed journey plans", "itemType": "map", "default": []},
+        "selectedDate": {"type": "string", "description": "Date for journey planning"},
+        "planStatus": {"type": "atom", "description": "Planning state", "enum": ["idle", "planning", "planned", "error"], "default": "idle"}
+      },
+      "behaviours": [
+        {
+          "name": "generate_plans",
+          "description": "Compute departure recommendations for all schedule entries on a given date",
+          "callType": "call",
+          "inputs": [{"name": "date", "type": "string"}, {"name": "origin", "type": "map"}, {"name": "destination", "type": "map"}, {"name": "schedule", "type": "list"}],
+          "outputs": [{"name": "plans", "type": "list"}],
+          "llmInvolved": false,
+          "emitsEvents": ["JourneyPlanGenerated"]
+        },
+        {
+          "name": "check_bike_restrictions",
+          "description": "Cross-reference journey times with bike-on-train rules",
+          "callType": "call",
+          "inputs": [{"name": "departureTime", "type": "string"}, {"name": "trainOperator", "type": "string"}],
+          "outputs": [{"name": "allowed", "type": "boolean"}, {"name": "reason", "type": "string"}],
+          "llmInvolved": false,
+          "emitsEvents": []
+        }
+      ],
+      "eventsEmitted": ["JourneyPlanGenerated"],
+      "supervision": {
+        "strategy": "one_for_one",
+        "maxRestarts": 2,
+        "maxSeconds": 30
+      }
+    },
+    {
+      "name": "WeatherService",
+      "type": "agent",
+      "description": "Fetches weather forecast from Open-Meteo for the user's origin location. Caches results for 30 minutes. Emits cycling advisories when rain or wind thresholds are exceeded.",
+      "requirementId": "TTC-011",
+      "stateSchema": {
+        "lat": {"type": "float", "description": "Latitude of location to fetch forecast for"},
+        "lng": {"type": "float", "description": "Longitude of location to fetch forecast for"},
+        "forecast": {"type": "list", "description": "Hourly forecast entries for next 6 hours", "itemType": "map", "default": []},
+        "cachedAt": {"type": "datetime", "description": "When forecast was last fetched"},
+        "fetchStatus": {"type": "atom", "description": "Fetch state", "enum": ["idle", "fetching", "loaded", "error"], "default": "idle"},
+        "advisoryActive": {"type": "boolean", "description": "Whether a cycling advisory is currently active", "default": false},
+        "advisoryReason": {"type": "string", "description": "Reason for advisory (rain/wind/both)", "default": ""}
+      },
+      "behaviours": [
+        {
+          "name": "fetch_forecast",
+          "description": "Fetch 6-hour hourly forecast from Open-Meteo for origin coordinates",
+          "callType": "call",
+          "inputs": [{"name": "lat", "type": "float"}, {"name": "lng", "type": "float"}],
+          "outputs": [{"name": "forecast", "type": "list"}],
+          "llmInvolved": false,
+          "emitsEvents": ["WeatherFetched"],
+          "cxdbGuards": ["RULE-009"]
+        },
+        {
+          "name": "evaluate_cycling_conditions",
+          "description": "Check forecast for rain > 60% probability or wind > 30 km/h and emit advisory if thresholds exceeded",
+          "callType": "call",
+          "inputs": [{"name": "forecast", "type": "list"}, {"name": "departureWindowStart", "type": "string"}],
+          "outputs": [{"name": "advisoryActive", "type": "boolean"}, {"name": "reason", "type": "string"}],
+          "llmInvolved": false,
+          "emitsEvents": ["CyclingAdvisory"]
+        }
+      ],
+      "eventsEmitted": ["WeatherFetched", "CyclingAdvisory"],
+      "supervision": {
+        "strategy": "one_for_one",
+        "maxRestarts": 3,
+        "maxSeconds": 60
+      }
+    },
+    {
+      "name": "LiveDepartureBoard",
+      "type": "agent",
+      "description": "Fetches real-time departure data for Tom's configured home station. Auto-refreshes every 60 seconds. Emits events for delays and cancellations.",
+      "requirementId": "TTC-012",
+      "stateSchema": {
+        "stationCode": {"type": "string", "description": "CRS station code for home station", "default": ""},
+        "departures": {"type": "list", "description": "Next 5 departures with platform and delay info", "itemType": "map", "default": []},
+        "lastFetched": {"type": "datetime", "description": "When departures were last fetched"},
+        "fetchStatus": {"type": "atom", "description": "Fetch state", "enum": ["idle", "fetching", "loaded", "error"], "default": "idle"},
+        "refreshIntervalMs": {"type": "integer", "description": "Auto-refresh interval in milliseconds", "default": 60000}
+      },
+      "behaviours": [
+        {
+          "name": "fetch_departures",
+          "description": "Fetch next 5 departures from Transport API for configured station",
+          "callType": "call",
+          "inputs": [{"name": "stationCode", "type": "string"}],
+          "outputs": [{"name": "departures", "type": "list"}],
+          "llmInvolved": false,
+          "emitsEvents": ["DeparturesFetched", "TrainDelayed", "TrainCancelled"],
+          "cxdbGuards": ["RULE-010"]
+        },
+        {
+          "name": "start_auto_refresh",
+          "description": "Begin periodic refresh using Page Visibility API to pause when tab is hidden",
+          "callType": "cast",
+          "inputs": [],
+          "outputs": [],
+          "llmInvolved": false,
+          "emitsEvents": []
+        }
+      ],
+      "eventsEmitted": ["DeparturesFetched", "TrainDelayed", "TrainCancelled"],
+      "supervision": {
+        "strategy": "one_for_one",
+        "maxRestarts": 3,
+        "maxSeconds": 60
+      }
+    },
+    {
+      "name": "DisruptionMonitor",
+      "type": "agent",
+      "description": "Monitors Tom's configured route for planned engineering works and real-time service disruptions. Shows alert banner when route is affected.",
+      "requirementId": "TTC-013",
+      "stateSchema": {
+        "routeOrigin": {"type": "string", "description": "Origin station CRS code"},
+        "routeDestination": {"type": "string", "description": "Destination station CRS code"},
+        "activeDisruptions": {"type": "list", "description": "Current disruptions affecting the route", "itemType": "map", "default": []},
+        "dismissed": {"type": "boolean", "description": "Whether user has dismissed current alert", "default": false},
+        "fetchStatus": {"type": "atom", "description": "Fetch state", "enum": ["idle", "fetching", "loaded", "error"], "default": "idle"}
+      },
+      "behaviours": [
+        {
+          "name": "check_disruptions",
+          "description": "Fetch disruption data and filter to those affecting the user's route",
+          "callType": "call",
+          "inputs": [{"name": "originCRS", "type": "string"}, {"name": "destinationCRS", "type": "string"}],
+          "outputs": [{"name": "disruptions", "type": "list"}],
+          "llmInvolved": false,
+          "emitsEvents": ["DisruptionDetected", "DisruptionCleared"]
+        },
+        {
+          "name": "dismiss_alert",
+          "description": "User dismisses disruption banner for current session",
+          "callType": "cast",
+          "inputs": [],
+          "outputs": [],
+          "llmInvolved": false,
+          "emitsEvents": []
+        }
+      ],
+      "eventsEmitted": ["DisruptionDetected", "DisruptionCleared"],
+      "supervision": {
+        "strategy": "one_for_one",
+        "maxRestarts": 2,
+        "maxSeconds": 30
+      }
+    },
+    {
+      "name": "CostTracker",
+      "type": "agent",
+      "description": "Tracks commute costs per journey, calculates 16-25 Railcard savings (1/3 off), and generates weekly and monthly spend summaries. All data stored in localStorage.",
+      "requirementId": "TTC-014",
+      "stateSchema": {
+        "journeys": {"type": "list", "description": "Array of journey cost records", "itemType": "map", "default": []},
+        "railcardActive": {"type": "boolean", "description": "Whether user has a 16-25 Railcard", "default": true},
+        "weeklySummary": {"type": "map", "description": "Aggregated spend for current week"},
+        "monthlySummary": {"type": "map", "description": "Aggregated spend for current month"}
+      },
+      "behaviours": [
+        {
+          "name": "record_journey_cost",
+          "description": "Log ticket price for a journey; calculate railcard saving if applicable",
+          "callType": "call",
+          "inputs": [{"name": "date", "type": "string"}, {"name": "ticketPrice", "type": "float"}, {"name": "journeyId", "type": "string"}],
+          "outputs": [{"name": "saving", "type": "float"}, {"name": "totalPaid", "type": "float"}],
+          "llmInvolved": false,
+          "emitsEvents": ["JourneyCostRecorded"],
+          "cxdbGuards": ["RULE-011"]
+        },
+        {
+          "name": "generate_weekly_summary",
+          "description": "Aggregate journey costs for the current week",
+          "callType": "call",
+          "inputs": [],
+          "outputs": [{"name": "summary", "type": "map"}],
+          "llmInvolved": false,
+          "emitsEvents": ["WeeklySummaryGenerated"]
+        },
+        {
+          "name": "export_csv",
+          "description": "Export all journey cost records as a CSV download",
+          "callType": "call",
+          "inputs": [],
+          "outputs": [{"name": "csvBlob", "type": "string"}],
+          "llmInvolved": false,
+          "emitsEvents": []
+        }
+      ],
+      "eventsEmitted": ["JourneyCostRecorded", "WeeklySummaryGenerated"],
+      "supervision": {
+        "strategy": "one_for_one",
+        "maxRestarts": 3,
+        "maxSeconds": 60
+      }
+    },
+    {
+      "name": "SafetyNotifier",
+      "type": "agent",
+      "description": "Sends an 'arrived safely' notification to a designated contact via webhook or Web Share API. Optionally triggers via geofence when device approaches college location.",
+      "requirementId": "TTC-015",
+      "stateSchema": {
+        "recipientConfigured": {"type": "boolean", "description": "Whether a recipient contact has been configured", "default": false},
+        "recipientType": {"type": "atom", "description": "How to notify the recipient", "enum": ["webhook", "share"], "default": "share"},
+        "geofenceEnabled": {"type": "boolean", "description": "Whether geofence auto-prompt is enabled", "default": false},
+        "notificationHistory": {"type": "list", "description": "History of sent notifications", "itemType": "map", "default": []},
+        "lastNotifiedAt": {"type": "datetime", "description": "Timestamp of most recent notification"}
+      },
+      "behaviours": [
+        {
+          "name": "send_arrival_notification",
+          "description": "Send 'arrived safely' notification to configured recipient",
+          "callType": "call",
+          "inputs": [{"name": "location", "type": "string"}, {"name": "timestamp", "type": "string"}],
+          "outputs": [{"name": "sent", "type": "boolean"}],
+          "llmInvolved": false,
+          "emitsEvents": ["ArrivalNotificationSent"],
+          "cxdbGuards": ["RULE-012"]
+        },
+        {
+          "name": "check_geofence",
+          "description": "Evaluate current position against college geofence; prompt if inside boundary",
+          "callType": "call",
+          "inputs": [{"name": "lat", "type": "float"}, {"name": "lng", "type": "float"}],
+          "outputs": [{"name": "insideGeofence", "type": "boolean"}],
+          "llmInvolved": false,
+          "emitsEvents": ["GeofenceTriggered"]
+        }
+      ],
+      "eventsEmitted": ["ArrivalNotificationSent", "GeofenceTriggered"],
+      "supervision": {
+        "strategy": "one_for_one",
+        "maxRestarts": 2,
+        "maxSeconds": 30
+      }
+    },
+    {
+      "name": "TermCalendar",
+      "type": "agent",
+      "description": "Stores college term dates and evaluates whether today is a college day. Auto-detects weekends and UK bank holidays. Suppresses journey features on non-term days.",
+      "requirementId": "TTC-016",
+      "stateSchema": {
+        "terms": {"type": "list", "description": "Array of term periods {start, end, label}", "itemType": "map", "default": []},
+        "halfTerms": {"type": "list", "description": "Array of half-term periods {start, end}", "itemType": "map", "default": []},
+        "bankHolidays": {"type": "list", "description": "UK bank holidays fetched from gov.uk", "itemType": "string", "default": []},
+        "isCollegeDay": {"type": "boolean", "description": "Whether today is a college day", "default": false},
+        "statusMessage": {"type": "string", "description": "Message to show on non-college days", "default": ""}
+      },
+      "behaviours": [
+        {
+          "name": "evaluate_today",
+          "description": "Check whether today is within a term period, not a weekend, and not a bank holiday",
+          "callType": "call",
+          "inputs": [{"name": "date", "type": "string"}],
+          "outputs": [{"name": "isCollegeDay", "type": "boolean"}, {"name": "reason", "type": "string"}],
+          "llmInvolved": false,
+          "emitsEvents": ["TermStatusChanged"]
+        },
+        {
+          "name": "fetch_bank_holidays",
+          "description": "Fetch UK bank holidays from gov.uk JSON feed and cache locally",
+          "callType": "call",
+          "inputs": [],
+          "outputs": [{"name": "bankHolidays", "type": "list"}],
+          "llmInvolved": false,
+          "emitsEvents": []
+        },
+        {
+          "name": "save_term_dates",
+          "description": "Persist term dates and half-terms to localStorage",
+          "callType": "cast",
+          "inputs": [{"name": "terms", "type": "list"}, {"name": "halfTerms", "type": "list"}],
+          "outputs": [],
+          "llmInvolved": false,
+          "emitsEvents": []
+        }
+      ],
+      "eventsEmitted": ["TermStatusChanged"],
+      "supervision": {
+        "strategy": "one_for_one",
+        "maxRestarts": 3,
+        "maxSeconds": 60
+      }
+    },
+    {
+      "name": "DelayRepayTracker",
+      "type": "task",
+      "description": "Detects when a scheduled train was 15 or more minutes late using live departure data. Prompts Tom to submit a Delay Repay claim, pre-filling journey details and linking to the correct operator claim page.",
+      "requirementId": "TTC-017",
+      "stateSchema": {
+        "detectedDelays": {"type": "list", "description": "Journeys where delay exceeded 15 minutes", "itemType": "map", "default": []},
+        "claims": {"type": "list", "description": "Delay Repay claims in various statuses", "itemType": "map", "default": []},
+        "claimStatus": {"type": "atom", "description": "Status of most recent claim", "enum": ["none", "prompted", "submitted", "pending", "received"], "default": "none"}
+      },
+      "behaviours": [
+        {
+          "name": "detect_delay",
+          "description": "Compare scheduled vs actual departure time; flag if delay >= 15 minutes",
+          "callType": "call",
+          "inputs": [{"name": "scheduledTime", "type": "string"}, {"name": "actualTime", "type": "string"}, {"name": "journeyId", "type": "string"}],
+          "outputs": [{"name": "delayMinutes", "type": "integer"}, {"name": "claimEligible", "type": "boolean"}],
+          "llmInvolved": false,
+          "emitsEvents": ["DelayDetected"]
+        },
+        {
+          "name": "prompt_claim",
+          "description": "Show claim prompt with pre-filled journey details and link to operator claim page",
+          "callType": "call",
+          "inputs": [{"name": "journeyId", "type": "string"}, {"name": "trainOperator", "type": "string"}],
+          "outputs": [{"name": "claimUrl", "type": "string"}],
+          "llmInvolved": false,
+          "emitsEvents": ["ClaimPrompted"]
+        },
+        {
+          "name": "record_claim_submitted",
+          "description": "User marks claim as submitted; persist status to localStorage",
+          "callType": "cast",
+          "inputs": [{"name": "claimId", "type": "string"}],
+          "outputs": [],
+          "llmInvolved": false,
+          "emitsEvents": ["ClaimSubmitted"]
+        }
+      ],
+      "eventsEmitted": ["DelayDetected", "ClaimPrompted", "ClaimSubmitted"],
+      "supervision": {
+        "strategy": "one_for_one",
+        "maxRestarts": 2,
+        "maxSeconds": 30
+      }
+    },
+    {
+      "name": "CommuteStatsTracker",
+      "type": "agent",
+      "description": "Tracks commute patterns, cycling distance, CO2 saved versus driving, and streak counters. Generates shareable weekly summaries. All calculations derived from existing journey data.",
+      "requirementId": "TTC-018",
+      "stateSchema": {
+        "commuteLogs": {"type": "list", "description": "Array of commute log entries", "itemType": "map", "default": []},
+        "currentStreak": {"type": "integer", "description": "Consecutive cycling days", "default": 0},
+        "totalDistanceCycledKm": {"type": "float", "description": "Total distance cycled in kilometres", "default": 0.0},
+        "totalCO2SavedKg": {"type": "float", "description": "Estimated CO2 saved vs car in kilograms", "default": 0.0},
+        "weeklyStats": {"type": "map", "description": "Stats aggregated for current week"}
+      },
+      "behaviours": [
+        {
+          "name": "log_commute",
+          "description": "Record a commute event (mode: bike/train/walk) with date and distance",
+          "callType": "call",
+          "inputs": [{"name": "date", "type": "string"}, {"name": "mode", "type": "string"}, {"name": "distanceKm", "type": "float"}],
+          "outputs": [{"name": "streak", "type": "integer"}, {"name": "co2Saved", "type": "float"}],
+          "llmInvolved": false,
+          "emitsEvents": ["CommuteLogged", "StreakUpdated"]
+        },
+        {
+          "name": "generate_weekly_stats",
+          "description": "Aggregate commute logs into weekly summary with CO2, distance, and streak data",
+          "callType": "call",
+          "inputs": [],
+          "outputs": [{"name": "stats", "type": "map"}],
+          "llmInvolved": false,
+          "emitsEvents": ["WeeklyStatsGenerated"]
+        }
+      ],
+      "eventsEmitted": ["CommuteLogged", "StreakUpdated", "WeeklyStatsGenerated"],
+      "supervision": {
+        "strategy": "one_for_one",
+        "maxRestarts": 3,
+        "maxSeconds": 60
+      }
+    }
+  ],
+
+  "executableScenarios": [
+    {
+      "id": "SCENARIO-001",
+      "name": "Postcode input resolves to coordinates",
+      "description": "Validates the full postcode entry flow: input, validation, geocoding, and display",
+      "validatesRequirement": "TTC-001",
+      "setup": {
+        "entities": [
+          {"type": "PostcodeResolver", "id": "resolver-1", "state": {"rawInput": "", "status": "idle"}}
+        ],
+        "mocks": [
+          {"type": "GoogleGeocodingAPI", "config": {"responseLatLng": {"lat": 51.5014, "lng": -0.1419}, "responseAddress": "10 Downing Street, London SW1A 2AA"}}
+        ]
+      },
+      "actions": [
+        {"type": "call", "target": "PostcodeResolver", "method": "validate_postcode", "args": {"rawInput": "SW1A 2AA"}, "storeResultAs": "validationResult"},
+        {"type": "call", "target": "PostcodeResolver", "method": "geocode_postcode", "args": {"postcode": "SW1A 2AA"}, "storeResultAs": "geocodeResult"}
+      ],
+      "assertions": [
+        {"type": "equals", "target": "validationResult.isValid", "expected": true, "description": "Postcode SW1A 2AA is valid UK format"},
+        {"type": "truthy", "target": "geocodeResult.lat", "description": "Geocoding returns a latitude"},
+        {"type": "truthy", "target": "geocodeResult.lng", "description": "Geocoding returns a longitude"},
+        {"type": "contains", "target": "geocodeResult.address", "pattern": "London", "description": "Resolved address contains London"}
+      ],
+      "timeout": 10000
+    },
+    {
+      "id": "SCENARIO-002",
+      "name": "Invalid postcode is rejected",
+      "description": "Validates that non-UK postcode formats are rejected by the validator",
+      "validatesRequirement": "TTC-001",
+      "validatesCxdbRule": "RULE-002",
+      "setup": {
+        "entities": [
+          {"type": "PostcodeResolver", "id": "resolver-2", "state": {"rawInput": "", "status": "idle"}}
+        ]
+      },
+      "actions": [
+        {"type": "call", "target": "PostcodeResolver", "method": "validate_postcode", "args": {"rawInput": "12345"}, "storeResultAs": "result1"},
+        {"type": "call", "target": "PostcodeResolver", "method": "validate_postcode", "args": {"rawInput": "INVALID"}, "storeResultAs": "result2"},
+        {"type": "call", "target": "PostcodeResolver", "method": "validate_postcode", "args": {"rawInput": ""}, "storeResultAs": "result3"}
+      ],
+      "assertions": [
+        {"type": "equals", "target": "result1.isValid", "expected": false, "description": "US zip code 12345 is not a valid UK postcode"},
+        {"type": "equals", "target": "result2.isValid", "expected": false, "description": "Random text INVALID is not a valid UK postcode"},
+        {"type": "equals", "target": "result3.isValid", "expected": false, "description": "Empty string is not a valid UK postcode"}
+      ],
+      "timeout": 5000
+    },
+    {
+      "id": "SCENARIO-003",
+      "name": "Geolocation acquires position and reverse-geocodes",
+      "description": "Validates browser geolocation flow with reverse geocoding",
+      "validatesRequirement": "TTC-002",
+      "validatesCxdbRule": "RULE-005",
+      "setup": {
+        "entities": [
+          {"type": "GeolocationService", "id": "geo-1", "state": {"permissionStatus": "granted"}}
+        ],
+        "mocks": [
+          {"type": "BrowserGeolocation", "config": {"lat": 51.5074, "lng": -0.1278, "accuracy": 10}},
+          {"type": "GoogleGeocodingAPI", "config": {"responseAddress": "Trafalgar Square, London WC2N 5DN", "responsePostcode": "WC2N 5DN"}}
+        ]
+      },
+      "actions": [
+        {"type": "call", "target": "GeolocationService", "method": "acquire_position", "storeResultAs": "position"},
+        {"type": "call", "target": "GeolocationService", "method": "reverse_geocode", "args": {"lat": 51.5074, "lng": -0.1278}, "storeResultAs": "address"}
+      ],
+      "assertions": [
+        {"type": "truthy", "target": "position.lat", "description": "Position acquired successfully"},
+        {"type": "less_than", "target": "position.accuracy", "max": 100, "description": "Position accuracy under 100m"},
+        {"type": "contains", "target": "address.postcode", "pattern": "WC2N", "description": "Reverse geocoding resolves to correct postcode area"}
+      ],
+      "timeout": 15000
+    },
+    {
+      "id": "SCENARIO-004",
+      "name": "Geolocation timeout triggers fallback",
+      "description": "Validates that a GPS timeout produces an error event and does not hang",
+      "validatesRequirement": "TTC-002",
+      "validatesCxdbRule": "RULE-005",
+      "setup": {
+        "entities": [
+          {"type": "GeolocationService", "id": "geo-2", "state": {"permissionStatus": "granted"}}
+        ],
+        "mocks": [
+          {"type": "BrowserGeolocation", "config": {"timeout": true}}
+        ]
+      },
+      "actions": [
+        {"type": "call", "target": "GeolocationService", "method": "acquire_position", "storeResultAs": "result"}
+      ],
+      "assertions": [
+        {"type": "truthy", "target": "result.error", "description": "Error is returned on timeout"},
+        {"type": "contains", "target": "result.error", "pattern": "timeout", "description": "Error message mentions timeout", "severity": "warning"}
+      ],
+      "timeout": 15000
+    },
+    {
+      "id": "SCENARIO-005",
+      "name": "Text schedule parsed into structured entries",
+      "description": "Validates LLM text schedule parsing produces valid structured output",
+      "validatesRequirement": "TTC-006",
+      "validatesCxdbRule": "RULE-003",
+      "setup": {
+        "entities": [
+          {"type": "ScheduleTextParser", "id": "parser-1", "state": {"parseStatus": "idle"}}
+        ],
+        "mocks": [
+          {"type": "LLMProvider", "config": {"model": "gpt-4o", "response": [{"dayOfWeek": "Monday", "startTime": "09:00", "endTime": "10:30", "subject": "Mathematics", "location": "Room 201", "confidence": "high"}]}}
+        ]
+      },
+      "actions": [
+        {"type": "call", "target": "ScheduleTextParser", "method": "parse_text", "args": {"text": "Monday 9am-10:30am Mathematics Room 201"}, "storeResultAs": "parsed"}
+      ],
+      "assertions": [
+        {"type": "count_min", "target": "parsed.entries", "min": 1, "description": "At least one schedule entry extracted"},
+        {"type": "equals", "target": "parsed.entries[0].dayOfWeek", "expected": "Monday", "description": "Day of week correctly extracted"},
+        {"type": "equals", "target": "parsed.entries[0].startTime", "expected": "09:00", "description": "Start time correctly extracted in 24h format"},
+        {"type": "is_member", "target": "parsed.confidence", "expected": ["high", "medium", "low"], "description": "Confidence field is a valid enum value"}
+      ],
+      "timeout": 30000
+    },
+    {
+      "id": "SCENARIO-006",
+      "name": "Schedule parsing requires user confirmation before saving",
+      "description": "Validates that parsed schedules are not auto-saved without user confirmation",
+      "validatesRequirement": "TTC-006",
+      "validatesCxdbRule": "RULE-008",
+      "setup": {
+        "entities": [
+          {"type": "ScheduleTextParser", "id": "parser-2", "state": {"parseStatus": "parsed", "parsedEntries": [{"dayOfWeek": "Monday", "startTime": "09:00", "endTime": "10:30", "subject": "Maths", "location": null, "confidence": "high"}]}}
+        ]
+      },
+      "actions": [
+        {"type": "assert_intermediate", "description": "After parsing, status should be 'parsed' not 'confirmed'"}
+      ],
+      "assertions": [
+        {"type": "equals", "target": "parser-2.parseStatus", "expected": "parsed", "description": "Status is 'parsed', not 'confirmed' - awaiting user action"},
+        {"type": "not_equals", "target": "parser-2.parseStatus", "expected": "confirmed", "description": "Schedule is NOT auto-confirmed"}
+      ],
+      "timeout": 5000
+    },
+    {
+      "id": "SCENARIO-007",
+      "name": "Bike rules search returns answer with citations",
+      "description": "Validates Perplexity returns a synthesised answer with source citations",
+      "validatesRequirement": "TTC-008",
+      "validatesCxdbRule": "RULE-004",
+      "setup": {
+        "entities": [
+          {"type": "BikeRulesSearcher", "id": "searcher-1", "state": {"searchStatus": "idle"}}
+        ],
+        "mocks": [
+          {"type": "PerplexityAPI", "config": {"answer": "Folding bikes are allowed on all Greater Anglia services at all times.", "citations": [{"url": "https://www.greateranglia.co.uk/travel-information/cycling", "title": "Greater Anglia Cycling"}]}}
+        ]
+      },
+      "actions": [
+        {"type": "call", "target": "BikeRulesSearcher", "method": "search_bike_rules", "args": {"bikeType": "folding", "trainOperator": "Greater Anglia", "travelTime": "08:00"}, "storeResultAs": "result"}
+      ],
+      "assertions": [
+        {"type": "truthy", "target": "result.answer", "description": "Answer text is non-empty"},
+        {"type": "count_min", "target": "result.citations", "min": 1, "description": "At least one citation is returned"},
+        {"type": "contains", "target": "result.citations[0].url", "pattern": "http", "description": "Citation contains a URL"}
+      ],
+      "timeout": 30000
+    },
+    {
+      "id": "SCENARIO-008",
+      "name": "Bike rules results are cached within TTL",
+      "description": "Validates that identical queries return cached results within the 1-hour TTL",
+      "validatesRequirement": "TTC-008",
+      "validatesCxdbRule": "RULE-007",
+      "setup": {
+        "entities": [
+          {"type": "BikeRulesSearcher", "id": "searcher-2", "state": {"searchStatus": "complete", "cachedAt": "2026-02-20T17:30:00Z", "answer": "Cached answer", "citations": []}}
+        ]
+      },
+      "actions": [
+        {"type": "call", "target": "BikeRulesSearcher", "method": "check_cache", "args": {"queryHash": "abc123"}, "storeResultAs": "cacheResult"}
+      ],
+      "assertions": [
+        {"type": "equals", "target": "cacheResult.hit", "expected": true, "description": "Cache hit for identical query within TTL"}
+      ],
+      "timeout": 5000
+    },
+    {
+      "id": "SCENARIO-009",
+      "name": "API error produces graceful fallback",
+      "description": "Validates that external API failures produce user-friendly error messages, not raw exceptions",
+      "validatesRequirement": "TTC-001",
+      "validatesCxdbRule": "RULE-006",
+      "setup": {
+        "entities": [
+          {"type": "PostcodeResolver", "id": "resolver-3", "state": {"status": "idle"}}
+        ],
+        "mocks": [
+          {"type": "GoogleGeocodingAPI", "config": {"error": true, "statusCode": 500}}
+        ]
+      },
+      "actions": [
+        {"type": "call", "target": "PostcodeResolver", "method": "geocode_postcode", "args": {"postcode": "SW1A 2AA"}, "storeResultAs": "result"}
+      ],
+      "assertions": [
+        {"type": "truthy", "target": "result.error", "description": "Error field is populated"},
+        {"type": "not_contains", "target": "result.error", "pattern": "500", "description": "Raw HTTP status code is not exposed to user"},
+        {"type": "not_contains", "target": "result.error", "pattern": "stack", "description": "Stack trace is not exposed to user"}
+      ],
+      "timeout": 10000
+    },
+    {
+      "id": "SCENARIO-010",
+      "name": "API keys never appear in client-side bundle",
+      "description": "Validates that server-side API keys (LLM, Perplexity) are not leaked to the browser",
+      "validatesRequirement": "TTC-008",
+      "validatesCxdbRule": "RULE-001",
+      "setup": {
+        "preconditions": [
+          "Application build completes successfully",
+          "Client-side JavaScript bundle is generated"
+        ]
+      },
+      "actions": [
+        {"type": "simulate", "description": "Scan client-side JS bundle for API key patterns"}
+      ],
+      "assertions": [
+        {"type": "not_contains", "target": "clientBundle", "pattern": "sk-", "description": "No OpenAI API keys in client bundle"},
+        {"type": "not_contains", "target": "clientBundle", "pattern": "pplx-", "description": "No Perplexity API keys in client bundle"},
+        {"type": "not_contains", "target": "clientBundle", "pattern": "PERPLEXITY_API_KEY", "description": "No Perplexity env var name in client bundle"}
+      ],
+      "timeout": 30000
+    },
+    {
+      "id": "SCENARIO-011",
+      "name": "Weather forecast cached and cycling advisory triggered",
+      "description": "Validates that weather forecast is cached for 30 minutes and that a cycling advisory is emitted when wind exceeds threshold",
+      "validatesRequirement": "TTC-011",
+      "validatesCxdbRule": "RULE-009",
+      "setup": {
+        "entities": [
+          {"type": "WeatherService", "id": "weather-1", "state": {"fetchStatus": "idle", "advisoryActive": false}}
+        ],
+        "mocks": [
+          {"type": "OpenMeteoAPI", "config": {"hourly": [{"hour": "08:00", "precipitationProbability": 20, "windspeed10m": 35, "temperature2m": 12}]}}
+        ]
+      },
+      "actions": [
+        {"type": "call", "target": "WeatherService", "method": "fetch_forecast", "args": {"lat": 51.5, "lng": -0.12}, "storeResultAs": "forecast"},
+        {"type": "call", "target": "WeatherService", "method": "evaluate_cycling_conditions", "args": {"forecast": "forecast", "departureWindowStart": "08:00"}, "storeResultAs": "advisory"}
+      ],
+      "assertions": [
+        {"type": "truthy", "target": "forecast", "description": "Forecast data returned from Open-Meteo"},
+        {"type": "equals", "target": "advisory.advisoryActive", "expected": true, "description": "Advisory active because wind exceeds 30 km/h threshold"},
+        {"type": "contains", "target": "advisory.reason", "pattern": "wind", "description": "Advisory reason mentions wind"}
+      ],
+      "timeout": 15000
+    },
+    {
+      "id": "SCENARIO-012",
+      "name": "Weather forecast respects 30-minute cache TTL",
+      "description": "Validates that a second fetch within 30 minutes returns cached data without a new API call",
+      "validatesRequirement": "TTC-011",
+      "validatesCxdbRule": "RULE-009",
+      "setup": {
+        "entities": [
+          {"type": "WeatherService", "id": "weather-2", "state": {"fetchStatus": "loaded", "cachedAt": "2026-02-20T07:45:00Z", "forecast": [{"hour": "08:00", "precipitationProbability": 10, "windspeed10m": 15}]}}
+        ]
+      },
+      "actions": [
+        {"type": "call", "target": "WeatherService", "method": "fetch_forecast", "args": {"lat": 51.5, "lng": -0.12}, "storeResultAs": "result"}
+      ],
+      "assertions": [
+        {"type": "equals", "target": "result.fromCache", "expected": true, "description": "Result returned from cache within TTL"},
+        {"type": "truthy", "target": "result.forecast", "description": "Cached forecast data is present"}
+      ],
+      "timeout": 5000
+    },
+    {
+      "id": "SCENARIO-013",
+      "name": "Live departure board shows next 5 departures",
+      "description": "Validates that the departure board fetches and displays up to 5 real-time departures with delay information",
+      "validatesRequirement": "TTC-012",
+      "validatesCxdbRule": "RULE-010",
+      "setup": {
+        "entities": [
+          {"type": "LiveDepartureBoard", "id": "board-1", "state": {"stationCode": "CBG", "fetchStatus": "idle"}}
+        ],
+        "mocks": [
+          {"type": "TransportAPI", "config": {"departures": [
+            {"scheduledTime": "08:05", "expectedTime": "08:18", "platform": "1", "destination": "London Kings Cross", "cancelled": false},
+            {"scheduledTime": "08:20", "expectedTime": "08:20", "platform": "2", "destination": "Peterborough", "cancelled": false},
+            {"scheduledTime": "08:35", "expectedTime": "08:35", "platform": "1", "destination": "London Kings Cross", "cancelled": false},
+            {"scheduledTime": "08:50", "expectedTime": null, "platform": null, "destination": "London Kings Cross", "cancelled": true},
+            {"scheduledTime": "09:05", "expectedTime": "09:05", "platform": "2", "destination": "London Kings Cross", "cancelled": false}
+          ]}}
+        ]
+      },
+      "actions": [
+        {"type": "call", "target": "LiveDepartureBoard", "method": "fetch_departures", "args": {"stationCode": "CBG"}, "storeResultAs": "board"}
+      ],
+      "assertions": [
+        {"type": "count_min", "target": "board.departures", "min": 5, "description": "At least 5 departures returned"},
+        {"type": "truthy", "target": "board.departures[0].scheduledTime", "description": "Each departure has a scheduled time"},
+        {"type": "equals", "target": "board.departures[3].cancelled", "expected": true, "description": "Cancellation status correctly populated"}
+      ],
+      "timeout": 10000
+    },
+    {
+      "id": "SCENARIO-014",
+      "name": "Live departure board respects 60-second minimum refresh interval",
+      "description": "Validates that a second fetch within 60 seconds is deferred, enforcing RULE-010",
+      "validatesRequirement": "TTC-012",
+      "validatesCxdbRule": "RULE-010",
+      "setup": {
+        "entities": [
+          {"type": "LiveDepartureBoard", "id": "board-2", "state": {"stationCode": "CBG", "fetchStatus": "loaded", "lastFetched": "2026-02-20T08:00:30Z"}}
+        ]
+      },
+      "actions": [
+        {"type": "call", "target": "LiveDepartureBoard", "method": "fetch_departures", "args": {"stationCode": "CBG"}, "storeResultAs": "result"}
+      ],
+      "assertions": [
+        {"type": "equals", "target": "result.deferred", "expected": true, "description": "Fetch deferred because minimum interval not elapsed"},
+        {"type": "truthy", "target": "result.secondsRemaining", "description": "Seconds remaining until next allowed fetch is reported"}
+      ],
+      "timeout": 5000
+    },
+    {
+      "id": "SCENARIO-015",
+      "name": "Journey cost recorded with railcard saving",
+      "description": "Validates that ticket price entry correctly calculates 1/3 railcard saving (16-25 Railcard)",
+      "validatesRequirement": "TTC-014",
+      "validatesCxdbRule": "RULE-011",
+      "setup": {
+        "entities": [
+          {"type": "CostTracker", "id": "cost-1", "state": {"railcardActive": true, "journeys": []}}
+        ]
+      },
+      "actions": [
+        {"type": "call", "target": "CostTracker", "method": "record_journey_cost", "args": {"date": "2026-02-20", "ticketPrice": 12.50, "journeyId": "j-001"}, "storeResultAs": "costResult"}
+      ],
+      "assertions": [
+        {"type": "equals", "target": "costResult.saving", "expected": 4.17, "description": "1/3 railcard saving correctly calculated (£12.50 * 1/3 = £4.17 rounded)"},
+        {"type": "equals", "target": "costResult.totalPaid", "expected": 8.33, "description": "Total paid is 2/3 of full price"}
+      ],
+      "timeout": 5000
+    },
+    {
+      "id": "SCENARIO-016",
+      "name": "Arrival notification requires opt-in configuration",
+      "description": "Validates that SafetyNotifier blocks notifications until recipient is configured, enforcing RULE-012",
+      "validatesRequirement": "TTC-015",
+      "validatesCxdbRule": "RULE-012",
+      "setup": {
+        "entities": [
+          {"type": "SafetyNotifier", "id": "notifier-1", "state": {"recipientConfigured": false}}
+        ]
+      },
+      "actions": [
+        {"type": "call", "target": "SafetyNotifier", "method": "send_arrival_notification", "args": {"location": "college", "timestamp": "2026-02-20T09:05:00Z"}, "storeResultAs": "result"}
+      ],
+      "assertions": [
+        {"type": "equals", "target": "result.sent", "expected": false, "description": "Notification blocked when recipient not configured"},
+        {"type": "truthy", "target": "result.error", "description": "Error message explains recipient configuration required"}
+      ],
+      "timeout": 5000
+    },
+    {
+      "id": "SCENARIO-017",
+      "name": "Term calendar suppresses features on non-college day",
+      "description": "Validates that TermCalendar correctly identifies a bank holiday as a non-college day",
+      "validatesRequirement": "TTC-016",
+      "setup": {
+        "entities": [
+          {"type": "TermCalendar", "id": "term-1", "state": {
+            "terms": [{"start": "2026-01-05", "end": "2026-04-01", "label": "Spring Term"}],
+            "halfTerms": [{"start": "2026-02-16", "end": "2026-02-20"}],
+            "bankHolidays": ["2026-04-03", "2026-04-06", "2026-05-04"]
+          }}
+        ]
+      },
+      "actions": [
+        {"type": "call", "target": "TermCalendar", "method": "evaluate_today", "args": {"date": "2026-02-21"}, "storeResultAs": "saturdayResult"},
+        {"type": "call", "target": "TermCalendar", "method": "evaluate_today", "args": {"date": "2026-02-17"}, "storeResultAs": "halfTermResult"},
+        {"type": "call", "target": "TermCalendar", "method": "evaluate_today", "args": {"date": "2026-02-18"}, "storeResultAs": "termDayResult"}
+      ],
+      "assertions": [
+        {"type": "equals", "target": "saturdayResult.isCollegeDay", "expected": false, "description": "Saturday is not a college day"},
+        {"type": "equals", "target": "halfTermResult.isCollegeDay", "expected": false, "description": "Half-term period is not a college day"},
+        {"type": "equals", "target": "termDayResult.isCollegeDay", "expected": true, "description": "Wednesday in term is a college day"}
+      ],
+      "timeout": 5000
+    },
+    {
+      "id": "SCENARIO-018",
+      "name": "Delay Repay claim prompted for 15+ minute delay",
+      "description": "Validates that DelayRepayTracker detects an eligible delay and prompts the user with pre-filled claim details",
+      "validatesRequirement": "TTC-017",
+      "setup": {
+        "entities": [
+          {"type": "DelayRepayTracker", "id": "delay-1", "state": {"detectedDelays": [], "claims": []}}
+        ]
+      },
+      "actions": [
+        {"type": "call", "target": "DelayRepayTracker", "method": "detect_delay", "args": {"scheduledTime": "08:05", "actualTime": "08:23", "journeyId": "j-002"}, "storeResultAs": "detection"},
+        {"type": "call", "target": "DelayRepayTracker", "method": "prompt_claim", "args": {"journeyId": "j-002", "trainOperator": "Great Northern"}, "storeResultAs": "prompt"}
+      ],
+      "assertions": [
+        {"type": "equals", "target": "detection.delayMinutes", "expected": 18, "description": "Delay correctly calculated as 18 minutes"},
+        {"type": "equals", "target": "detection.claimEligible", "expected": true, "description": "Delay over 15 minutes is eligible for claim"},
+        {"type": "truthy", "target": "prompt.claimUrl", "description": "Operator claim URL is returned for claim form link"}
+      ],
+      "timeout": 5000
+    }
+  ],
+
+  "cxdbRules": [
+    {
+      "id": "RULE-001",
+      "category": "custom",
+      "description": "API keys for server-side services (LLM providers, Perplexity) must never be exposed in client-side code or bundles. Only NEXT_PUBLIC_ prefixed keys are allowed client-side.",
+      "lesson": "Exposing API keys in client bundles allows abuse and incurs unexpected costs",
+      "trigger": {
+        "entity": "PlaceAutocompleteService",
+        "action": "fetch_suggestions"
+      },
+      "guard": {
+        "type": "custom_predicate",
+        "expression": "!envVar.startsWith('NEXT_PUBLIC_') => mustBeServerSide()"
+      },
+      "onViolation": {
+        "action": "block",
+        "emitEvent": "SecurityViolation"
+      },
+      "scenarioValidation": "SCENARIO-010",
+      "status": "active"
+    },
+    {
+      "id": "RULE-002",
+      "category": "custom",
+      "description": "All postcode inputs must be validated against the UK postcode regex before geocoding. Reject non-UK formats to prevent wasted API calls.",
+      "lesson": "Sending invalid postcodes to Google Geocoding wastes API quota and returns confusing results",
+      "trigger": {
+        "entity": "PostcodeResolver",
+        "action": "geocode_postcode"
+      },
+      "guard": {
+        "type": "custom_predicate",
+        "field": "postcode",
+        "expression": "matches(/^[A-Z]{1,2}[0-9][A-Z0-9]?\\s?[0-9][A-Z]{2}$/i)"
+      },
+      "onViolation": {
+        "action": "block",
+        "emitEvent": "PostcodeValidated"
+      },
+      "scenarioValidation": "SCENARIO-002",
+      "status": "active"
+    },
+    {
+      "id": "RULE-003",
+      "category": "custom",
+      "description": "LLM schedule parsing must return valid JSON conforming to the ScheduleEntry schema. Non-JSON or malformed responses must be caught and reported as parse errors.",
+      "lesson": "LLM outputs can be non-deterministic; structured output validation prevents downstream crashes",
+      "trigger": {
+        "entity": "ScheduleTextParser",
+        "action": "parse_text"
+      },
+      "guard": {
+        "type": "custom_predicate",
+        "expression": "output.every(e => e.dayOfWeek && e.startTime && e.endTime && e.subject)"
+      },
+      "onViolation": {
+        "action": "redirect",
+        "redirectTo": "show_raw_text_for_manual_formatting",
+        "emitEvent": "LLMParsingError"
+      },
+      "scenarioValidation": "SCENARIO-005",
+      "status": "active"
+    },
+    {
+      "id": "RULE-004",
+      "category": "custom",
+      "description": "Bike-on-train rule search results must always include at least one citation URL. Answers without sources are unreliable for transport planning decisions.",
+      "lesson": "Users need to verify bike rules against official operator websites before travelling",
+      "trigger": {
+        "entity": "BikeRulesSearcher",
+        "action": "search_bike_rules"
+      },
+      "guard": {
+        "type": "minimum_count",
+        "field": "citations",
+        "threshold": 1,
+        "operator": ">="
+      },
+      "onViolation": {
+        "action": "warn",
+        "emitEvent": "BikeRulesSearchCompleted"
+      },
+      "scenarioValidation": "SCENARIO-007",
+      "status": "active"
+    },
+    {
+      "id": "RULE-005",
+      "category": "custom",
+      "description": "Browser geolocation must timeout after 10 seconds maximum. On timeout or permission denial, fall back to manual postcode input without blocking the UI.",
+      "lesson": "GPS can hang indefinitely on some devices; hard timeout prevents UX deadlock",
+      "trigger": {
+        "entity": "GeolocationService",
+        "action": "acquire_position"
+      },
+      "guard": {
+        "type": "time_constraint",
+        "field": "acquiring",
+        "threshold": 10000,
+        "operator": "<="
+      },
+      "onViolation": {
+        "action": "redirect",
+        "redirectTo": "show_manual_postcode_input",
+        "emitEvent": "LocationError"
+      },
+      "scenarioValidation": "SCENARIO-004",
+      "status": "active"
+    },
+    {
+      "id": "RULE-006",
+      "category": "custom",
+      "description": "All external API calls must have error handling that catches network failures, HTTP errors, and malformed responses. User-facing error messages must be friendly, not raw technical errors.",
+      "lesson": "Raw API errors confuse non-technical users and expose implementation details",
+      "trigger": {
+        "entity": "PostcodeResolver",
+        "action": "geocode_postcode"
+      },
+      "guard": {
+        "type": "custom_predicate",
+        "expression": "hasTryCatch(apiCall) && hasUserFriendlyMessage(errorHandler)"
+      },
+      "onViolation": {
+        "action": "block",
+        "emitEvent": "LocationError"
+      },
+      "scenarioValidation": "SCENARIO-009",
+      "status": "active"
+    },
+    {
+      "id": "RULE-007",
+      "category": "custom",
+      "description": "Perplexity search results must be cached with a maximum TTL of 1 hour. Identical queries within TTL must return the cached result to save API costs.",
+      "lesson": "Train operator bike rules do not change minute-by-minute; caching saves cost and improves responsiveness",
+      "trigger": {
+        "entity": "BikeRulesSearcher",
+        "action": "search_bike_rules"
+      },
+      "guard": {
+        "type": "time_constraint",
+        "field": "cachedAt",
+        "threshold": 3600000,
+        "operator": "<="
+      },
+      "onViolation": {
+        "action": "log"
+      },
+      "scenarioValidation": "SCENARIO-008",
+      "status": "active"
+    },
+    {
+      "id": "RULE-008",
+      "category": "custom",
+      "description": "LLM-parsed schedules must be shown to the user for confirmation before being saved to localStorage. Auto-saving without user review risks storing incorrect data.",
+      "lesson": "LLM extraction is probabilistic; user confirmation is required for correctness",
+      "trigger": {
+        "entity": "ScheduleTextParser",
+        "action": "confirm_schedule"
+      },
+      "guard": {
+        "type": "required_field",
+        "field": "userConfirmed",
+        "operator": "==",
+        "values": [true]
+      },
+      "onViolation": {
+        "action": "block",
+        "emitEvent": "ScheduleTextParsed"
+      },
+      "scenarioValidation": "SCENARIO-006",
+      "status": "active"
+    },
+    {
+      "id": "RULE-009",
+      "category": "custom",
+      "description": "Open-Meteo weather forecast must be cached for a minimum of 30 minutes. Fetching more frequently on a free API is wasteful and risks being rate-limited.",
+      "lesson": "Weather does not change minute-by-minute; 30-minute cache is sufficient for cycling decisions",
+      "trigger": {
+        "entity": "WeatherService",
+        "action": "fetch_forecast"
+      },
+      "guard": {
+        "type": "time_constraint",
+        "field": "cachedAt",
+        "threshold": 1800000,
+        "operator": ">="
+      },
+      "onViolation": {
+        "action": "redirect",
+        "redirectTo": "return_cached_forecast",
+        "emitEvent": "WeatherFetched"
+      },
+      "scenarioValidation": "SCENARIO-012",
+      "status": "active"
+    },
+    {
+      "id": "RULE-010",
+      "category": "custom",
+      "description": "Live departure board must not refresh more frequently than every 60 seconds. Enforces Transport API free tier limits and prevents request flooding.",
+      "lesson": "Transport API free tier allows 1000 requests/day; 60-second minimum refresh limits to 1440 requests/day maximum",
+      "trigger": {
+        "entity": "LiveDepartureBoard",
+        "action": "fetch_departures"
+      },
+      "guard": {
+        "type": "time_constraint",
+        "field": "lastFetched",
+        "threshold": 60000,
+        "operator": ">="
+      },
+      "onViolation": {
+        "action": "block",
+        "emitEvent": "DeparturesFetched"
+      },
+      "scenarioValidation": "SCENARIO-014",
+      "status": "active"
+    },
+    {
+      "id": "RULE-011",
+      "category": "custom",
+      "description": "Commute cost data must always be user-entered. The app must never auto-infer or guess ticket prices from journey data.",
+      "lesson": "Ticket prices vary by time of day, railcard, advance booking, and route; auto-inference would be unreliable and potentially misleading for budget tracking",
+      "trigger": {
+        "entity": "CostTracker",
+        "action": "record_journey_cost"
+      },
+      "guard": {
+        "type": "custom_predicate",
+        "field": "ticketPrice",
+        "expression": "ticketPrice.source === 'user_input' && ticketPrice.value > 0"
+      },
+      "onViolation": {
+        "action": "block",
+        "emitEvent": "JourneyCostRecorded"
+      },
+      "scenarioValidation": "SCENARIO-015",
+      "status": "active"
+    },
+    {
+      "id": "RULE-012",
+      "category": "custom",
+      "description": "Arrival notifications require explicit opt-in from both Tom (sender) and the recipient. The feature must be disabled by default and require active configuration before any notification is sent.",
+      "lesson": "Sending unsolicited notifications to a contact's phone or email without consent is a privacy violation and potential GDPR issue",
+      "trigger": {
+        "entity": "SafetyNotifier",
+        "action": "send_arrival_notification"
+      },
+      "guard": {
+        "type": "required_field",
+        "field": "recipientConfigured",
+        "operator": "==",
+        "values": [true]
+      },
+      "onViolation": {
+        "action": "block",
+        "emitEvent": "ArrivalNotificationSent"
+      },
+      "scenarioValidation": "SCENARIO-016",
+      "status": "active"
+    }
+  ],
+
+  "eventSchemas": [
+    {
+      "name": "PostcodeValidated",
+      "description": "Emitted when a postcode input is validated (pass or fail)",
+      "emittedBy": ["PostcodeResolver"],
+      "fields": {
+        "rawInput": {"type": "string", "description": "The input that was validated"},
+        "isValid": {"type": "boolean", "description": "Whether validation passed"},
+        "normalised": {"type": "string", "description": "Normalised postcode if valid"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "PostcodeResolved",
+      "description": "Emitted when a postcode or geolocation is successfully resolved to coordinates and address",
+      "emittedBy": ["PostcodeResolver", "GeolocationService"],
+      "fields": {
+        "postcode": {"type": "string", "description": "Resolved postcode"},
+        "address": {"type": "string", "description": "Human-readable address"},
+        "lat": {"type": "float", "description": "Latitude"},
+        "lng": {"type": "float", "description": "Longitude"},
+        "source": {"type": "atom", "description": "How it was resolved", "enum": ["manual", "geolocation", "places"]}
+      },
+      "category": "system"
+    },
+    {
+      "name": "GeolocationAcquired",
+      "description": "Emitted when browser geolocation successfully returns coordinates",
+      "emittedBy": ["GeolocationService"],
+      "fields": {
+        "lat": {"type": "float", "description": "Latitude"},
+        "lng": {"type": "float", "description": "Longitude"},
+        "accuracy": {"type": "float", "description": "Accuracy in metres"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "LocationError",
+      "description": "Emitted when any location operation fails (geocoding, geolocation, reverse geocoding)",
+      "emittedBy": ["PostcodeResolver", "GeolocationService"],
+      "fields": {
+        "operation": {"type": "string", "description": "Which operation failed"},
+        "errorMessage": {"type": "string", "description": "User-friendly error message"},
+        "technical": {"type": "string", "description": "Technical error for logging"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "DestinationSaved",
+      "description": "Emitted when a user saves a destination with a label",
+      "emittedBy": ["DestinationManager"],
+      "fields": {
+        "destinationId": {"type": "string", "description": "Unique destination ID"},
+        "label": {"type": "string", "description": "User-defined label"},
+        "postcode": {"type": "string", "description": "Destination postcode"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "DestinationSelected",
+      "description": "Emitted when a user selects a previously saved destination",
+      "emittedBy": ["DestinationManager"],
+      "fields": {
+        "destinationId": {"type": "string", "description": "Selected destination ID"},
+        "label": {"type": "string", "description": "Destination label"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "DestinationDeleted",
+      "description": "Emitted when a user removes a saved destination",
+      "emittedBy": ["DestinationManager"],
+      "fields": {
+        "destinationId": {"type": "string", "description": "Deleted destination ID"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "PlaceSuggestionsLoaded",
+      "description": "Emitted when Google Places Autocomplete returns suggestions",
+      "emittedBy": ["PlaceAutocompleteService"],
+      "fields": {
+        "query": {"type": "string", "description": "Search query"},
+        "count": {"type": "integer", "description": "Number of suggestions returned"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "PlaceSelected",
+      "description": "Emitted when a user selects a place from autocomplete suggestions",
+      "emittedBy": ["PlaceAutocompleteService"],
+      "fields": {
+        "placeId": {"type": "string", "description": "Google Place ID"},
+        "name": {"type": "string", "description": "Place name"},
+        "address": {"type": "string", "description": "Full address"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "MapMarkersUpdated",
+      "description": "Emitted when map markers are added or updated",
+      "emittedBy": ["MapRenderer"],
+      "fields": {
+        "originSet": {"type": "boolean", "description": "Whether origin marker is placed"},
+        "destinationSet": {"type": "boolean", "description": "Whether destination marker is placed"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "ScheduleTextParsed",
+      "description": "Emitted when LLM successfully extracts schedule entries from text",
+      "emittedBy": ["ScheduleTextParser"],
+      "fields": {
+        "entryCount": {"type": "integer", "description": "Number of entries extracted"},
+        "confidence": {"type": "atom", "description": "Overall confidence", "enum": ["high", "medium", "low"]},
+        "inputLength": {"type": "integer", "description": "Character length of input text"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "ScheduleImageParsed",
+      "description": "Emitted when LLM vision model extracts schedule entries from an image",
+      "emittedBy": ["ScheduleImageParser"],
+      "fields": {
+        "entryCount": {"type": "integer", "description": "Number of entries extracted"},
+        "confidence": {"type": "atom", "description": "Overall confidence", "enum": ["high", "medium", "low"]},
+        "imageFormat": {"type": "string", "description": "Image format (PNG, JPG, WEBP)"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "ScheduleConfirmed",
+      "description": "Emitted when user confirms the parsed schedule (with or without edits)",
+      "emittedBy": ["ScheduleTextParser", "ScheduleImageParser"],
+      "fields": {
+        "entryCount": {"type": "integer", "description": "Number of confirmed entries"},
+        "editsApplied": {"type": "integer", "description": "Number of user corrections applied"},
+        "source": {"type": "atom", "description": "How the schedule was input", "enum": ["text", "image"]}
+      },
+      "category": "system"
+    },
+    {
+      "name": "LLMParsingError",
+      "description": "Emitted when LLM parsing fails (invalid JSON, timeout, API error)",
+      "emittedBy": ["ScheduleTextParser", "ScheduleImageParser"],
+      "fields": {
+        "errorType": {"type": "string", "description": "Error category (invalid_json, timeout, api_error)"},
+        "errorMessage": {"type": "string", "description": "User-friendly error message"},
+        "inputType": {"type": "atom", "description": "Whether text or image failed", "enum": ["text", "image"]}
+      },
+      "category": "system"
+    },
+    {
+      "name": "BikeRulesSearchCompleted",
+      "description": "Emitted when a Perplexity search for bike rules completes (success or cached)",
+      "emittedBy": ["BikeRulesSearcher"],
+      "fields": {
+        "query": {"type": "string", "description": "Search query used"},
+        "citationCount": {"type": "integer", "description": "Number of citations returned"},
+        "fromCache": {"type": "boolean", "description": "Whether result came from cache"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "BikeShareFetched",
+      "description": "Emitted when bike-share availability data is fetched from providers",
+      "emittedBy": ["BikeShareProvider"],
+      "fields": {
+        "stationCount": {"type": "integer", "description": "Number of stations found"},
+        "providers": {"type": "list", "description": "Providers queried", "itemType": "string"},
+        "searchRadius": {"type": "integer", "description": "Search radius in metres"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "JourneyPlanGenerated",
+      "description": "Emitted when journey plans are computed for a day's schedule",
+      "emittedBy": ["JourneyOrchestrator"],
+      "fields": {
+        "date": {"type": "string", "description": "Date plans were generated for"},
+        "planCount": {"type": "integer", "description": "Number of journey plans generated"},
+        "hasRestrictions": {"type": "boolean", "description": "Whether any plans have bike restriction warnings"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "SecurityViolation",
+      "description": "Emitted when an API key safety rule is violated (should never reach production)",
+      "emittedBy": ["PlaceAutocompleteService"],
+      "fields": {
+        "ruleId": {"type": "string", "description": "Which rule was violated"},
+        "detail": {"type": "string", "description": "Description of the violation"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "WeatherFetched",
+      "description": "Emitted when a weather forecast is successfully fetched from Open-Meteo or returned from cache",
+      "emittedBy": ["WeatherService"],
+      "fields": {
+        "lat": {"type": "float", "description": "Latitude of forecast location"},
+        "lng": {"type": "float", "description": "Longitude of forecast location"},
+        "hourCount": {"type": "integer", "description": "Number of hourly forecast entries returned"},
+        "fromCache": {"type": "boolean", "description": "Whether result came from 30-minute cache"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "CyclingAdvisory",
+      "description": "Emitted when weather conditions exceed cycling thresholds (rain probability > 60% or wind > 30 km/h)",
+      "emittedBy": ["WeatherService"],
+      "fields": {
+        "advisoryActive": {"type": "boolean", "description": "Whether advisory is active"},
+        "reason": {"type": "string", "description": "Human-readable reason (rain/wind/both)"},
+        "precipitationProbability": {"type": "integer", "description": "Max rain probability in departure window (%)"},
+        "windspeed": {"type": "float", "description": "Max wind speed in departure window (km/h)"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "DeparturesFetched",
+      "description": "Emitted when live departure data is successfully fetched from the Transport API",
+      "emittedBy": ["LiveDepartureBoard"],
+      "fields": {
+        "stationCode": {"type": "string", "description": "CRS code of the station queried"},
+        "departureCount": {"type": "integer", "description": "Number of departures returned"},
+        "fromCache": {"type": "boolean", "description": "Whether result came from cache"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "TrainDelayed",
+      "description": "Emitted when a departure is running late (actual time after scheduled time)",
+      "emittedBy": ["LiveDepartureBoard"],
+      "fields": {
+        "trainId": {"type": "string", "description": "Departure identifier"},
+        "scheduledTime": {"type": "string", "description": "Scheduled departure time"},
+        "expectedTime": {"type": "string", "description": "Current expected departure time"},
+        "delayMinutes": {"type": "integer", "description": "Delay in minutes"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "TrainCancelled",
+      "description": "Emitted when a scheduled departure is cancelled",
+      "emittedBy": ["LiveDepartureBoard"],
+      "fields": {
+        "trainId": {"type": "string", "description": "Departure identifier"},
+        "scheduledTime": {"type": "string", "description": "Originally scheduled departure time"},
+        "cancellationReason": {"type": "string", "description": "Reason for cancellation if provided"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "DisruptionDetected",
+      "description": "Emitted when a disruption affecting the user's route is detected",
+      "emittedBy": ["DisruptionMonitor"],
+      "fields": {
+        "disruptionId": {"type": "string", "description": "Unique disruption identifier"},
+        "type": {"type": "atom", "description": "Whether planned or real-time", "enum": ["planned", "realtime"]},
+        "affectedRoute": {"type": "string", "description": "Route affected by this disruption"},
+        "summary": {"type": "string", "description": "Short description of the disruption"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "DisruptionCleared",
+      "description": "Emitted when a previously detected disruption is no longer affecting the route",
+      "emittedBy": ["DisruptionMonitor"],
+      "fields": {
+        "disruptionId": {"type": "string", "description": "Unique disruption identifier that has cleared"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "JourneyCostRecorded",
+      "description": "Emitted when a journey cost entry is saved to the cost tracker",
+      "emittedBy": ["CostTracker"],
+      "fields": {
+        "journeyId": {"type": "string", "description": "Journey identifier"},
+        "date": {"type": "string", "description": "Date of journey"},
+        "ticketPrice": {"type": "float", "description": "Full ticket price entered by user"},
+        "saving": {"type": "float", "description": "Railcard saving applied (0 if no railcard)"},
+        "totalPaid": {"type": "float", "description": "Amount actually paid after railcard"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "WeeklySummaryGenerated",
+      "description": "Emitted when the cost tracker generates a weekly spend summary",
+      "emittedBy": ["CostTracker"],
+      "fields": {
+        "weekStartDate": {"type": "string", "description": "Monday date of the summarised week"},
+        "totalSpend": {"type": "float", "description": "Total amount paid in the week"},
+        "totalSavings": {"type": "float", "description": "Total railcard savings in the week"},
+        "journeyCount": {"type": "integer", "description": "Number of journeys in the week"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "ArrivalNotificationSent",
+      "description": "Emitted when an 'arrived safely' notification is successfully dispatched to the recipient",
+      "emittedBy": ["SafetyNotifier"],
+      "fields": {
+        "timestamp": {"type": "string", "description": "When the notification was sent"},
+        "location": {"type": "string", "description": "Named location Tom arrived at"},
+        "method": {"type": "atom", "description": "How notification was sent", "enum": ["webhook", "share"]}
+      },
+      "category": "system"
+    },
+    {
+      "name": "GeofenceTriggered",
+      "description": "Emitted when device enters the geofenced area around college, prompting the arrived safely notification",
+      "emittedBy": ["SafetyNotifier"],
+      "fields": {
+        "lat": {"type": "float", "description": "Current device latitude"},
+        "lng": {"type": "float", "description": "Current device longitude"},
+        "distanceFromCentreM": {"type": "float", "description": "Distance from geofence centre in metres"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "TermStatusChanged",
+      "description": "Emitted when the college day status changes (e.g. at midnight into or out of a term period)",
+      "emittedBy": ["TermCalendar"],
+      "fields": {
+        "date": {"type": "string", "description": "Date being evaluated"},
+        "isCollegeDay": {"type": "boolean", "description": "Whether date is a college day"},
+        "reason": {"type": "string", "description": "Why it is or is not a college day (weekend/bank holiday/half-term/term)"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "DelayDetected",
+      "description": "Emitted when a journey is found to have been delayed by 15 or more minutes, making it eligible for Delay Repay",
+      "emittedBy": ["DelayRepayTracker"],
+      "fields": {
+        "journeyId": {"type": "string", "description": "Journey identifier"},
+        "scheduledTime": {"type": "string", "description": "Scheduled departure time"},
+        "actualTime": {"type": "string", "description": "Actual departure time"},
+        "delayMinutes": {"type": "integer", "description": "Calculated delay in minutes"},
+        "claimEligible": {"type": "boolean", "description": "Whether delay meets Delay Repay threshold"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "ClaimPrompted",
+      "description": "Emitted when the user is prompted to submit a Delay Repay claim for an eligible journey",
+      "emittedBy": ["DelayRepayTracker"],
+      "fields": {
+        "journeyId": {"type": "string", "description": "Journey identifier for pre-fill"},
+        "trainOperator": {"type": "string", "description": "Train operator name"},
+        "claimUrl": {"type": "string", "description": "Direct URL to operator Delay Repay claim page"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "ClaimSubmitted",
+      "description": "Emitted when user marks a Delay Repay claim as submitted",
+      "emittedBy": ["DelayRepayTracker"],
+      "fields": {
+        "claimId": {"type": "string", "description": "Claim identifier"},
+        "journeyId": {"type": "string", "description": "Journey the claim relates to"},
+        "submittedAt": {"type": "string", "description": "Timestamp when user marked as submitted"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "CommuteLogged",
+      "description": "Emitted when a commute event is recorded in the stats tracker",
+      "emittedBy": ["CommuteStatsTracker"],
+      "fields": {
+        "date": {"type": "string", "description": "Date of commute"},
+        "mode": {"type": "string", "description": "Transport mode (bike/train/walk)"},
+        "distanceKm": {"type": "float", "description": "Distance in kilometres"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "StreakUpdated",
+      "description": "Emitted when the cycling streak counter changes",
+      "emittedBy": ["CommuteStatsTracker"],
+      "fields": {
+        "currentStreak": {"type": "integer", "description": "Updated consecutive cycling days count"},
+        "previousStreak": {"type": "integer", "description": "Streak count before this update"},
+        "streakBroken": {"type": "boolean", "description": "Whether the streak was broken (reset to 0)"}
+      },
+      "category": "system"
+    },
+    {
+      "name": "WeeklyStatsGenerated",
+      "description": "Emitted when the commute stats tracker generates a weekly summary",
+      "emittedBy": ["CommuteStatsTracker"],
+      "fields": {
+        "weekStartDate": {"type": "string", "description": "Monday date of summarised week"},
+        "daysCommuted": {"type": "integer", "description": "Number of days commuted that week"},
+        "distanceCycledKm": {"type": "float", "description": "Total kilometres cycled that week"},
+        "co2SavedKg": {"type": "float", "description": "Estimated CO2 saved vs car that week"}
+      },
+      "category": "system"
+    }
+  ]
+}
