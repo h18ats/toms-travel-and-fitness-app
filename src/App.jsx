@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 
 // ═══════════════════════════════════════════════════════════════
 // TOM'S TRAVEL COMPANION
@@ -6,40 +8,36 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 // ⚡ EDIT THESE PLACEHOLDERS to match Tom's actual details
 // ═══════════════════════════════════════════════════════════════
 
-// ── LOCATION CONFIG ──────────────────────────────────────────
-const HOME_POSTCODE = "GU7 1LW";           // Tom's home postcode (Godalming)
-const SCHOOL_STATION = "Woking";            // Nearest station to college
-const SCHOOL_STATION_CODE = "WOK";          // National Rail CRS code
-const SCHOOL_NAME = "Woking College";       // College name
-const WX_LAT = 51.1854;                    // Weather latitude (Godalming)
-const WX_LON = -0.6127;                    // Weather longitude
+// ── LOCATION CONFIG (loaded from localStorage) ──────────────
+const _savedLocs = JSON.parse(localStorage.getItem('ttc_locations') || 'null');
+const LOCS_CONFIGURED = !!_savedLocs;
 
-// ── GEOLOCATION ────────────────────────────────────────────
-const HOME_LAT = 51.186;
-const HOME_LON = -0.613;
-const COLLEGE_LAT = 51.319;
-const COLLEGE_LON = -0.556;
+const HOME_POSTCODE = _savedLocs?.homePostcode || "";
+const SCHOOL_STATION = _savedLocs?.schoolStation || "Woking";
+const SCHOOL_STATION_CODE = _savedLocs?.schoolStationCode || "WOK";
+const SCHOOL_NAME = _savedLocs?.schoolName || "College";
+const WX_LAT = _savedLocs?.home?.lat || 0;
+const WX_LON = _savedLocs?.home?.lon || 0;
 
-// ── HOME STATIONS (both shown in combined train list) ────────
-const HOME_STATIONS = {
+const HOME_LAT = _savedLocs?.home?.lat || 0;
+const HOME_LON = _savedLocs?.home?.lon || 0;
+const COLLEGE_LAT = _savedLocs?.college?.lat || 0;
+const COLLEGE_LON = _savedLocs?.college?.lon || 0;
+
+const HOME_STATIONS = _savedLocs?.homeStations || {
   GOD: { name: "Godalming", code: "GOD", bikeMi: 2.5, bikeMins: 12 },
   FNC: { name: "Farncombe", code: "FNC", bikeMi: 1.5, bikeMins: 8 },
 };
-const DEFAULT_HOME_STATION = "GOD";
+const DEFAULT_HOME_STATION = _savedLocs?.defaultHomeStation || Object.keys(HOME_STATIONS)[0] || "GOD";
 
-// ── RUBY'S (SANDHURST, BERKSHIRE) ─────────────────────
-const RUBY_NAME = "Ruby";
-const RUBY_POSTCODE = "GU47 9AG";
-const RUBY_STATION = "Sandhurst";
-const RUBY_STATION_CODE = "SND";
-const RUBY_LAT = 51.348;
-const RUBY_LON = -0.801;
-const BIKE_STN_RUBY = { mi: 1.2, mins: 8 }; // Sandhurst station → Green Lane
-const SUNDAY_LEAVE_RUBY = "19:00"; // Tom aims to leave Ruby's ~7pm Sunday
-
-// ── SAFETY CONTACT ──────────────────────────────────────────
-const SAFETY_CONTACT = "+447512070"; // Andy's number
-const SAFETY_CONTACT_NAME = "Dad";
+const RUBY_NAME = _savedLocs?.rubyName || "Ruby";
+const RUBY_POSTCODE = _savedLocs?.rubyPostcode || "";
+const RUBY_STATION = _savedLocs?.rubyStation || "Sandhurst";
+const RUBY_STATION_CODE = _savedLocs?.rubyStationCode || "SND";
+const RUBY_LAT = _savedLocs?.ruby?.lat || 0;
+const RUBY_LON = _savedLocs?.ruby?.lon || 0;
+const BIKE_STN_RUBY = _savedLocs?.bikeRuby || { mi: 1.2, mins: 8 };
+const SUNDAY_LEAVE_RUBY = _savedLocs?.sundayLeaveRuby || "19:00";
 
 // ── SWR BIKE RULES ──────────────────────────────────────────
 const SWR_BIKE_RULES = [
@@ -57,15 +55,54 @@ const SWR_BIKE_RULES = [
 const BIKE_STN_SCHOOL = { mi: 1.0, mins: 6 };  // Woking station → Woking College
 const TRAIN_MINS = 20;                           // Train journey time (via Guildford)
 const BUF = 5;                                   // Buffer minutes
+const RUBY_TRAIN_MINS = 35;                      // WOK → SND fallback estimate
+const RUBY_RETURN_TRAIN_MINS = 25;               // SND → GLD fallback estimate
+const GLD_CONNECTION_MINS = 10;                   // Guildford platform change estimate
+const GLD_TO_HOME_TRAIN_MINS = 8;                // GLD → GOD/FNC fallback estimate
+
+// ── GEOFENCE ZONES (200m radius for ride tracking) ──────────
+const STATION_COORDS = {
+  GOD: { lat: 51.186, lon: -0.612 },
+  FNC: { lat: 51.193, lon: -0.601 },
+  WOK: { lat: 51.318, lon: -0.557 },
+  SND: { lat: 51.347, lon: -0.811 },
+};
+const GEOFENCE_RADIUS_KM = 0.2; // 200m
+
+const RIDE_SEGMENTS = {
+  home_to_god: { label: "Home \u2192 Godalming", mi: 2.5, defaultMins: 12 },
+  god_to_home: { label: "Godalming \u2192 Home", mi: 2.5, defaultMins: 12 },
+  home_to_fnc: { label: "Home \u2192 Farncombe", mi: 1.5, defaultMins: 8 },
+  fnc_to_home: { label: "Farncombe \u2192 Home", mi: 1.5, defaultMins: 8 },
+  wok_to_college: { label: "Woking \u2192 College", mi: 1.0, defaultMins: 6 },
+  college_to_wok: { label: "College \u2192 Woking", mi: 1.0, defaultMins: 6 },
+  ruby_to_snd: { label: "Ruby's \u2192 Sandhurst", mi: 1.2, defaultMins: 8 },
+  snd_to_ruby: { label: "Sandhurst \u2192 Ruby's", mi: 1.2, defaultMins: 8 },
+};
+
+const getZones = () => ({
+  home: { lat: HOME_LAT, lon: HOME_LON },
+  college: { lat: COLLEGE_LAT, lon: COLLEGE_LON },
+  ruby: { lat: RUBY_LAT, lon: RUBY_LON },
+  god: STATION_COORDS.GOD,
+  fnc: STATION_COORDS.FNC,
+  wok: STATION_COORDS.WOK,
+  snd: STATION_COORDS.SND,
+});
+
+const ZONE_TO_SEGMENT = {
+  home_god: "home_to_god", god_home: "god_to_home",
+  home_fnc: "home_to_fnc", fnc_home: "fnc_to_home",
+  wok_college: "wok_to_college", college_wok: "college_to_wok",
+  ruby_snd: "ruby_to_snd", snd_ruby: "snd_to_ruby",
+};
 
 // ── TERM DATES ───────────────────────────────────────────────
 const TERM_START = new Date(2026, 0, 5);   // 5 Jan 2026
 const TERM_END = new Date(2026, 6, 17);    // 17 Jul 2026
 
 // ═══════════════════════════════════════════════════════════════
-// TIMETABLE — Thomas Ritzinger-Kimbell (24007585)
-// Woking College — Tutor Group UALJPT25
-// Senior Tutor: LTH · Personal Tutor: JPT
+// TIMETABLE
 // ═══════════════════════════════════════════════════════════════
 const TT = {
   1: {
@@ -246,7 +283,9 @@ const getGymSlots = (sessions) => {
 // ═══════════════════════════════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════════════════════════════
-const HUXLEY = "https://national-rail-api.davwheat.dev";
+const TRAINS_API = "/api/trains";
+const authToken = () => localStorage.getItem("ttc_auth") || "";
+const trainUrl = (from, to, count = 15) => `${TRAINS_API}?from=${from}&to=${to}&count=${count}&token=${encodeURIComponent(authToken())}`;
 const fmt = d => d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 const fmtDate = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const fmtShort = d => d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
@@ -412,7 +451,268 @@ const trainKey = (t) => `${t.stnKey}_${t.std}`;
 // ═══════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════
+
+// ── LOCATION SETUP WIZARD ────────────────────────────────────
+// ── MAP PICKER (Leaflet + CartoDB Dark Matter) ───────────
+const PIN_ICON = L.divIcon({
+  html: '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="40" viewBox="0 0 28 40"><path d="M14 0C6.27 0 0 6.27 0 14c0 10.5 14 26 14 26s14-15.5 14-26C28 6.27 21.73 0 14 0z" fill="#6366f1"/><circle cx="14" cy="14" r="6" fill="#fff"/></svg>',
+  iconSize: [28, 40],
+  iconAnchor: [14, 40],
+  className: "",
+});
+
+function MapPicker({ coords, onChange, stepKey, searchPlaceholder }) {
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markerRef = useRef(null);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+
+  const round3 = (n) => Math.round(n * 1000) / 1000;
+
+  const placeMarker = (map, lat, lon) => {
+    if (markerRef.current) {
+      markerRef.current.setLatLng([lat, lon]);
+    } else {
+      const m = L.marker([lat, lon], { icon: PIN_ICON, draggable: true }).addTo(map);
+      m.on("dragend", () => {
+        const p = m.getLatLng();
+        onChangeRef.current({ lat: round3(p.lat), lon: round3(p.lng) });
+      });
+      markerRef.current = m;
+    }
+  };
+
+  const doSearch = async () => {
+    const q = query.trim();
+    if (!q) return;
+    setSearching(true);
+    setResults([]);
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&countrycodes=gb&limit=5`);
+      const data = await r.json();
+      setResults(data.map(d => ({ name: d.display_name, lat: parseFloat(d.lat), lon: parseFloat(d.lon) })));
+    } catch { setResults([]); }
+    setSearching(false);
+  };
+
+  const selectResult = (r) => {
+    const lat = round3(r.lat);
+    const lon = round3(r.lon);
+    const map = mapInstanceRef.current;
+    if (map) {
+      placeMarker(map, lat, lon);
+      map.flyTo([lat, lon], 15, { duration: 0.8 });
+    }
+    onChange({ lat, lon });
+    setResults([]);
+    setQuery("");
+  };
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const center = coords ? [coords.lat, coords.lon] : [51.25, -0.75];
+    const zoom = coords ? 13 : 8;
+    const map = L.map(mapRef.current, { zoomControl: false }).setView(center, zoom);
+    L.control.zoom({ position: "bottomright" }).addTo(map);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+      attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
+      maxZoom: 19,
+    }).addTo(map);
+
+    if (coords) placeMarker(map, coords.lat, coords.lon);
+
+    map.on("click", (e) => {
+      const lat = round3(e.latlng.lat);
+      const lon = round3(e.latlng.lng);
+      placeMarker(map, lat, lon);
+      onChangeRef.current({ lat, lon });
+    });
+
+    mapInstanceRef.current = map;
+    return () => { map.remove(); mapInstanceRef.current = null; markerRef.current = null; };
+  }, [stepKey]);
+
+  // Sync marker/view when coords change externally (GPS or manual input)
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !coords) return;
+    placeMarker(map, coords.lat, coords.lon);
+    map.flyTo([coords.lat, coords.lon], Math.max(map.getZoom(), 13), { duration: 0.8 });
+  }, [coords?.lat, coords?.lon]);
+
+  const boxStyle = { width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid rgba(148,163,184,0.2)", backgroundColor: "rgba(30,41,59,0.8)", color: "#e2e8f0", fontSize: 13, outline: "none", boxSizing: "border-box" };
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+        <input
+          type="text" value={query} placeholder={searchPlaceholder || "Search place or postcode..."}
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && doSearch()}
+          style={{ ...boxStyle, flex: 1 }}
+        />
+        <button onClick={doSearch} disabled={searching || !query.trim()} style={{ padding: "8px 14px", borderRadius: 8, border: "none", cursor: "pointer", backgroundColor: "#6366f1", color: "#fff", fontSize: 12, fontWeight: 700, opacity: searching ? 0.6 : 1, whiteSpace: "nowrap" }}>
+          {searching ? "..." : "\uD83D\uDD0D"}
+        </button>
+      </div>
+      {results.length > 0 && (
+        <div style={{ marginBottom: 8, borderRadius: 8, border: "1px solid rgba(148,163,184,0.15)", overflow: "hidden", maxHeight: 150, overflowY: "auto" }}>
+          {results.map((r, i) => (
+            <div key={i} onClick={() => selectResult(r)} style={{ padding: "8px 12px", fontSize: 11, color: "#e2e8f0", cursor: "pointer", backgroundColor: i % 2 ? "rgba(30,41,59,0.6)" : "rgba(30,41,59,0.9)", borderBottom: i < results.length - 1 ? "1px solid rgba(148,163,184,0.1)" : "none" }}>
+              {r.name.length > 80 ? r.name.slice(0, 80) + "..." : r.name}
+            </div>
+          ))}
+        </div>
+      )}
+      <div ref={mapRef} style={{ width: "100%", height: 250, borderRadius: 12, overflow: "hidden", border: "1px solid rgba(148,163,184,0.15)" }} />
+      <div style={{ fontSize: 9, color: "#475569", marginTop: 4, textAlign: "right" }}>Tap to place pin \u00b7 drag pin to adjust</div>
+    </div>
+  );
+}
+
+function LocationSetup({ onComplete }) {
+  const [step, setStep] = useState(0);
+  const [locs, setLocs] = useState({
+    homePostcode: "", schoolStation: "Woking", schoolStationCode: "WOK", schoolName: "Woking College",
+    home: null, college: null, ruby: null,
+    rubyName: "Ruby", rubyPostcode: "", rubyStation: "Sandhurst", rubyStationCode: "SND",
+    bikeRuby: { mi: 1.2, mins: 8 }, sundayLeaveRuby: "19:00", defaultHomeStation: "GOD",
+    homeStations: { GOD: { name: "Godalming", code: "GOD", bikeMi: 2.5, bikeMins: 12 }, FNC: { name: "Farncombe", code: "FNC", bikeMi: 1.5, bikeMins: 8 } },
+  });
+  const [gpsStatus, setGpsStatus] = useState("");
+
+  const captureGPS = (key) => {
+    setGpsStatus("Getting location...");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocs(p => ({ ...p, [key]: { lat: Math.round(pos.coords.latitude * 1000) / 1000, lon: Math.round(pos.coords.longitude * 1000) / 1000 } }));
+        setGpsStatus("Captured!");
+        setTimeout(() => setGpsStatus(""), 1500);
+      },
+      () => setGpsStatus("GPS failed — enter manually"),
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  const setManualCoord = (key, field, val) => {
+    const num = parseFloat(val);
+    if (!isNaN(num)) setLocs(p => ({ ...p, [key]: { ...(p[key] || { lat: 0, lon: 0 }), [field]: num } }));
+  };
+
+  const finish = () => {
+    localStorage.setItem('ttc_locations', JSON.stringify(locs));
+    onComplete();
+  };
+
+  const allSet = locs.home && locs.college && locs.ruby;
+  const inputStyle = { width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid rgba(148,163,184,0.2)", backgroundColor: "rgba(30,41,59,0.8)", color: "#e2e8f0", fontSize: 13, outline: "none", boxSizing: "border-box", marginBottom: 8 };
+  const btnStyle = { padding: "10px 20px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700 };
+
+  const steps = [
+    { key: "home", label: "Home Location", icon: "\uD83C\uDFE0", desc: "Search your postcode, drop a pin, or use GPS.", search: "e.g. GU7 1AB or Godalming" },
+    { key: "college", label: "College Location", icon: "\uD83C\uDFEB", desc: "Search for your college, drop a pin, or use GPS.", search: "e.g. Woking College" },
+    { key: "ruby", label: "Ruby's Location", icon: "\u2764\uFE0F", desc: "Search the address, drop a pin, or use GPS.", search: "e.g. GU47 or Sandhurst" },
+  ];
+
+  const s = steps[step];
+  const coord = locs[s.key];
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg,#0a1628,#1e1b4b)", fontFamily: "'Inter','SF Pro Display',system-ui,sans-serif" }}>
+      <div style={{ backgroundColor: "rgba(15,23,42,0.8)", backdropFilter: "blur(20px)", borderRadius: 20, border: "1px solid rgba(148,163,184,0.1)", padding: 32, width: 420, maxWidth: "90vw", textAlign: "center" }}>
+        <div style={{ fontSize: 36, marginBottom: 8 }}>{s.icon}</div>
+        <div style={{ fontSize: 16, fontWeight: 800, color: "#e2e8f0", marginBottom: 4 }}>{s.label}</div>
+        <div style={{ fontSize: 11, color: "#64748b", marginBottom: 16 }}>Step {step + 1} of 3 — {s.desc}</div>
+
+        <MapPicker key={s.key} stepKey={s.key} coords={coord} onChange={(c) => setLocs(p => ({ ...p, [s.key]: c }))} searchPlaceholder={s.search} />
+
+        <div style={{ marginTop: 12 }} />
+        <button onClick={() => captureGPS(s.key)} style={{ ...btnStyle, width: "100%", backgroundColor: "#6366f1", color: "#fff", marginBottom: 12 }}>
+          {"\uD83D\uDCCD"} Use Current Location
+        </button>
+        {gpsStatus && <div style={{ fontSize: 11, color: "#6ee7b7", marginBottom: 8 }}>{gpsStatus}</div>}
+
+        <div style={{ fontSize: 10, color: "#64748b", marginBottom: 8 }}>Or enter coordinates manually:</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input type="number" step="0.001" placeholder="Latitude" value={coord?.lat || ""} onChange={e => setManualCoord(s.key, "lat", e.target.value)} style={inputStyle} />
+          <input type="number" step="0.001" placeholder="Longitude" value={coord?.lon || ""} onChange={e => setManualCoord(s.key, "lon", e.target.value)} style={inputStyle} />
+        </div>
+
+        {coord && <div style={{ fontSize: 11, color: "#6ee7b7", marginBottom: 12 }}>{"\u2705"} Set: {coord.lat}, {coord.lon}</div>}
+
+        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+          {step > 0 && <button onClick={() => setStep(s => s - 1)} style={{ ...btnStyle, flex: 1, backgroundColor: "rgba(148,163,184,.1)", color: "#94a3b8" }}>Back</button>}
+          {step < 2 && <button onClick={() => setStep(s => s + 1)} disabled={!coord} style={{ ...btnStyle, flex: 1, backgroundColor: coord ? "#10b981" : "#475569", color: "#fff" }}>Next</button>}
+          {step === 2 && <button onClick={finish} disabled={!allSet} style={{ ...btnStyle, flex: 1, backgroundColor: allSet ? "#10b981" : "#475569", color: "#fff" }}>Finish Setup</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── AUTH GATE ────────────────────────────────────────────────
+function LoginScreen({ onAuth }) {
+  const [pw, setPw] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true); setErr("");
+    try {
+      const r = await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pw }) });
+      const d = await r.json();
+      if (r.ok && d.token) { localStorage.setItem("ttc_auth", d.token); onAuth(); }
+      else setErr(d.error || "Wrong password");
+    } catch { setErr("Connection error"); }
+    setBusy(false);
+  };
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg,#0a1628,#1e1b4b)", fontFamily: "'Inter','SF Pro Display',system-ui,sans-serif" }}>
+      <form onSubmit={submit} style={{ backgroundColor: "rgba(15,23,42,0.8)", backdropFilter: "blur(20px)", borderRadius: 20, border: "1px solid rgba(148,163,184,0.1)", padding: 40, width: 320, textAlign: "center" }}>
+        <div style={{ fontSize: 36, marginBottom: 8 }}>{"\uD83D\uDE82"}</div>
+        <div style={{ fontSize: 18, fontWeight: 800, color: "#e2e8f0", marginBottom: 4 }}>Tom's Travel Companion</div>
+        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 24 }}>Enter password to continue</div>
+        <input type="password" value={pw} onChange={e => setPw(e.target.value)} placeholder="Password" autoFocus style={{
+          width: "100%", padding: "12px 16px", borderRadius: 10, border: "1px solid rgba(148,163,184,0.2)",
+          backgroundColor: "rgba(30,41,59,0.8)", color: "#e2e8f0", fontSize: 14, outline: "none", marginBottom: 12,
+          boxSizing: "border-box",
+        }} />
+        {err && <div style={{ fontSize: 12, color: "#ef4444", marginBottom: 8 }}>{err}</div>}
+        <button type="submit" disabled={busy || !pw} style={{
+          width: "100%", padding: "12px", borderRadius: 10, border: "none", cursor: "pointer",
+          backgroundColor: "#6366f1", color: "#fff", fontSize: 14, fontWeight: 700, opacity: busy ? 0.6 : 1,
+        }}>{busy ? "Checking..." : "Enter"}</button>
+      </form>
+    </div>
+  );
+}
+
 export default function App() {
+  // Auth state
+  const [authed, setAuthed] = useState(() => !!localStorage.getItem("ttc_auth"));
+  const [authChecked, setAuthChecked] = useState(false);
+
+  useEffect(() => {
+    const token = localStorage.getItem("ttc_auth");
+    if (!token) { setAuthChecked(true); return; }
+    fetch(`/api/auth?token=${encodeURIComponent(token)}`)
+      .then(r => { if (!r.ok) { localStorage.removeItem("ttc_auth"); setAuthed(false); } })
+      .catch(() => {})
+      .finally(() => setAuthChecked(true));
+  }, []);
+
+  if (!authChecked) return <div style={{ minHeight: "100vh", background: "#0a1628" }} />;
+  if (!authed) return <LoginScreen onAuth={() => setAuthed(true)} />;
+  if (!LOCS_CONFIGURED) return <LocationSetup onComplete={() => window.location.reload()} />;
+
+  return <AppContent />;
+}
+
+function AppContent() {
   const [now, setNow] = useState(new Date());
   const [wx, setWx] = useState(null);
   const [trainsGOD, setTrainsGOD] = useState({ to: [], from: [] });
@@ -435,10 +735,6 @@ export default function App() {
   const [userLoc, setUserLoc] = useState(null);
   const [locLabel, setLocLabel] = useState(null);
 
-  // Arrived Safely
-  const [safetyHistory, setSafetyHistory] = useState(() => JSON.parse(localStorage.getItem('ttc_safety') || '[]'));
-  const [showSafetyConfirm, setShowSafetyConfirm] = useState(false);
-
   // Delay Repay
   const [delayRepayModal, setDelayRepayModal] = useState(null); // holds delay info object or null
   const [delayRepayHistory, setDelayRepayHistory] = useState(() => JSON.parse(localStorage.getItem('ttc_delayrep') || '[]'));
@@ -459,6 +755,16 @@ export default function App() {
 
   // Commute Stats
   const [commuteLog, setCommuteLog] = useState(() => JSON.parse(localStorage.getItem('ttc_commute') || '[]'));
+
+  // Bus Replacement Alerts
+  const [busAlerts, setBusAlerts] = useState([]);
+
+  // Ride Tracking & PBs
+  const [rides, setRides] = useState(() => JSON.parse(localStorage.getItem('ttc_rides') || '[]'));
+  const [pbs, setPbs] = useState(() => JSON.parse(localStorage.getItem('ttc_pbs') || '{}'));
+  const [rideModel, setRideModel] = useState(() => JSON.parse(localStorage.getItem('ttc_ride_model') || '{}'));
+  const [rideState, setRideState] = useState({ status: "idle", zone: null, startTime: null, startZone: null });
+  const [pbCelebration, setPbCelebration] = useState(null);
 
   // Bank Holidays
   const [bankHols, setBankHols] = useState([]);
@@ -492,16 +798,84 @@ export default function App() {
   // ═══════════════════════════════════════════════════════════
   // SMART DATE + DIRECTION LOGIC
   // ═══════════════════════════════════════════════════════════
-  const { planDate, dir, modeLabel, modeIcon } = useMemo(() => {
+  const { planDate, dir, travelMode, modeLabel, modeIcon } = useMemo(() => {
+    // Manual direction overrides for Ruby
+    const rubyManualMode = manualDir === "toRuby" ? "college_to_ruby" : manualDir === "fromRuby" ? "ruby_to_home" : null;
+
     if (manualDate !== null) {
       const md = manualDate;
-      const d = manualDir || "to";
-      return { planDate: md, dir: d, modeLabel: `Planning ${fmtShort(md)}`, modeIcon: "\uD83D\uDCC5" };
+      const d = rubyManualMode ? (rubyManualMode === "college_to_ruby" ? "from" : "to") : (manualDir || "to");
+      const tm = rubyManualMode || (d === "to" ? "home_to_college" : "college_to_home");
+      const rubyLbl = rubyManualMode === "college_to_ruby" ? " \u2014 to Ruby's" : rubyManualMode === "ruby_to_home" ? " \u2014 home from Ruby's" : "";
+      return { planDate: md, dir: d, travelMode: tm, modeLabel: `Planning ${fmtShort(md)}${rubyLbl}`, modeIcon: rubyManualMode ? "\u2764\uFE0F" : "\uD83D\uDCC5" };
     }
     const today = dayClone(now);
     const todayTT = TT[today.getDay()];
     const hasClassToday = todayTT.sessions.length > 0 && today >= TERM_START && today <= TERM_END;
     const nowMins = now.getHours() * 60 + now.getMinutes();
+    const dayOfWeek = today.getDay();
+
+    // Ruby-aware branches — check before normal college logic
+    const atRuby = locLabel === "At Ruby's" || locLabel === "Near Ruby's";
+
+    // Friday at college after classes → college_to_ruby
+    if (dayOfWeek === 5 && hasClassToday && !rubyManualMode) {
+      const endMins = hm(todayTT.end).h * 60 + hm(todayTT.end).m;
+      const atCollege = locLabel === "At college" || locLabel === "Near college";
+      if (nowMins >= endMins && atCollege) {
+        return { planDate: today, dir: "from", travelMode: "college_to_ruby", modeLabel: "Friday \u2014 heading to Ruby's", modeIcon: "\u2764\uFE0F" };
+      }
+    }
+
+    // At/near Ruby's on ANY day → show ruby_to_home for next Sunday
+    // (Friday at-college-after-classes is already handled above)
+    if (atRuby && !rubyManualMode) {
+      if (dayOfWeek === 0) {
+        // Sunday — heading home today
+        return { planDate: today, dir: "to", travelMode: "ruby_to_home", modeLabel: "Sunday \u2014 heading home from Ruby's", modeIcon: "\u2764\uFE0F" };
+      }
+      // Any other day at Ruby's — plan Sunday trip home
+      const daysToSunday = (7 - dayOfWeek) % 7 || 7;
+      const sunday = dayClone(today, daysToSunday);
+      const dayName = DAYS[dayOfWeek];
+      return { planDate: sunday, dir: "to", travelMode: "ruby_to_home", modeLabel: `${dayName} at Ruby's \u2014 heading home Sunday`, modeIcon: "\u2764\uFE0F" };
+    }
+
+    // Manual Ruby override (with auto date) — pick a sensible date
+    if (rubyManualMode) {
+      const d = rubyManualMode === "college_to_ruby" ? "from" : "to";
+      let rubyDate = today;
+      let rubyLabel = "";
+      if (rubyManualMode === "college_to_ruby") {
+        // If today is a weekday with classes, use today; otherwise find next Friday (or next class day)
+        if (hasClassToday) {
+          rubyDate = today;
+          rubyLabel = `${todayTT.label} \u2014 to Ruby's after college`;
+        } else {
+          // Find next Friday with classes
+          for (let i = 1; i <= 7; i++) {
+            const chk = dayClone(today, i);
+            if (chk.getDay() === 5 && chk >= TERM_START && chk <= TERM_END && TT[5].sessions.length > 0) {
+              rubyDate = chk;
+              rubyLabel = `Next Friday \u2014 to Ruby's (${fmtShort(chk)})`;
+              break;
+            }
+          }
+          if (rubyLabel === "") { rubyDate = today; rubyLabel = "To Ruby's"; }
+        }
+      } else {
+        // ruby_to_home — if today is Sunday use today, else find next Sunday
+        if (dayOfWeek === 0) {
+          rubyDate = today;
+          rubyLabel = "Sunday \u2014 heading home from Ruby's";
+        } else {
+          const daysToSunday = (7 - dayOfWeek) % 7 || 7;
+          rubyDate = dayClone(today, daysToSunday);
+          rubyLabel = `Next Sunday \u2014 home from Ruby's (${fmtShort(rubyDate)})`;
+        }
+      }
+      return { planDate: rubyDate, dir: d, travelMode: rubyManualMode, modeLabel: rubyLabel, modeIcon: "\u2764\uFE0F" };
+    }
 
     if (hasClassToday) {
       const startMins = hm(todayTT.start).h * 60 + hm(todayTT.start).m;
@@ -516,16 +890,19 @@ export default function App() {
 
       const locDir = (locLabel === "At college" || locLabel === "Near college") ? "from" : "to";
       if (nowMins < startMins + 30) {
-        return { planDate: today, dir: manualDir || locDir, modeLabel: "Morning \u2014 time to head to college", modeIcon: "\uD83C\uDF05" };
+        const d = manualDir || locDir;
+        return { planDate: today, dir: d, travelMode: d === "to" ? "home_to_college" : "college_to_home", modeLabel: "Morning \u2014 time to head to college", modeIcon: "\uD83C\uDF05" };
       }
       if (nowMins < actualEndMins) {
-        return { planDate: today, dir: manualDir || (locLabel === "At home" || locLabel === "Near home" ? "to" : "from"), modeLabel: "At college \u2014 planning your trip home", modeIcon: "\uD83D\uDCDA" };
+        const d = manualDir || (locLabel === "At home" || locLabel === "Near home" ? "to" : "from");
+        return { planDate: today, dir: d, travelMode: d === "to" ? "home_to_college" : "college_to_home", modeLabel: "At college \u2014 planning your trip home", modeIcon: "\uD83D\uDCDA" };
       }
       const nxt = nextSchoolDay(dayClone(now, 1));
       if (nxt) {
         const daysAway = Math.round((nxt - today) / 864e5);
         const when = daysAway === 1 ? "tomorrow" : `in ${daysAway} days`;
-        return { planDate: nxt, dir: manualDir || "to", modeLabel: `Evening \u2014 next college ${when} (${DAYS[nxt.getDay()]})`, modeIcon: "\uD83C\uDF19" };
+        const d = manualDir || "to";
+        return { planDate: nxt, dir: d, travelMode: d === "to" ? "home_to_college" : "college_to_home", modeLabel: `Evening \u2014 next college ${when} (${DAYS[nxt.getDay()]})`, modeIcon: "\uD83C\uDF19" };
       }
     }
 
@@ -534,10 +911,14 @@ export default function App() {
       const daysAway = Math.round((nxt - today) / 864e5);
       const when = daysAway === 0 ? "today" : daysAway === 1 ? "tomorrow" : `in ${daysAway} days`;
       const timeOfDay = now.getHours() >= 17 ? "Evening" : now.getHours() >= 12 ? "Afternoon" : "Morning";
-      return { planDate: nxt, dir: manualDir || "to", modeLabel: `${timeOfDay} \u2014 next college ${when} (${DAYS[nxt.getDay()]})`, modeIcon: "\uD83C\uDF19" };
+      const d = manualDir || "to";
+      return { planDate: nxt, dir: d, travelMode: d === "to" ? "home_to_college" : "college_to_home", modeLabel: `${timeOfDay} \u2014 next college ${when} (${DAYS[nxt.getDay()]})`, modeIcon: "\uD83C\uDF19" };
     }
-    return { planDate: today, dir: manualDir || "to", modeLabel: "Outside term dates", modeIcon: "\uD83C\uDFD6\uFE0F" };
+    const d = manualDir || "to";
+    return { planDate: today, dir: d, travelMode: d === "to" ? "home_to_college" : "college_to_home", modeLabel: "Outside term dates", modeIcon: "\uD83C\uDFD6\uFE0F" };
   }, [now, manualDate, manualDir, showAfterSchool, locLabel]);
+
+  const isRubyRoute = travelMode === "college_to_ruby" || travelMode === "ruby_to_home";
 
   const isToday = planDate.toDateString() === new Date().toDateString();
   const isFuture = !isToday;
@@ -546,16 +927,27 @@ export default function App() {
   const inTerm = planDate >= TERM_START && planDate <= TERM_END;
   const isBankHol = bankHols.includes(planDate.toISOString().split('T')[0]) || bankHols.includes(fmtDate(planDate));
 
-  // Live distance from current position to nearest station (bike ETA)
+  // Live distance from current position to nearest relevant station (bike ETA)
   const liveStationETA = useMemo(() => {
     if (!userLoc) return null;
-    const godDist = haversine(userLoc.lat, userLoc.lon, 51.186, -0.611); // Godalming station
-    const fncDist = haversine(userLoc.lat, userLoc.lon, 51.193, -0.607); // Farncombe station
-    const nearest = godDist < fncDist ? { name: "Godalming", code: "GOD", dist: godDist } : { name: "Farncombe", code: "FNC", dist: fncDist };
+    const atRubyArea = locLabel === "At Ruby's" || locLabel === "Near Ruby's";
+    if (atRubyArea) {
+      // Show bike time to Sandhurst station
+      const sndDist = haversine(userLoc.lat, userLoc.lon, RUBY_LAT, RUBY_LON + 0.02); // approx SND station
+      const bikeMinutes = Math.round(sndDist / 0.25);
+      const walkMinutes = Math.round(sndDist / 0.083);
+      return { name: "Sandhurst", code: "SND", dist: sndDist, bikeMinutes, walkMinutes };
+    }
+    const stnKeys = Object.keys(HOME_STATIONS);
+    const godDist = haversine(userLoc.lat, userLoc.lon, HOME_LAT, HOME_LON);
+    const fncDist = stnKeys.length > 1 ? haversine(userLoc.lat, userLoc.lon, HOME_LAT + 0.007, HOME_LON + 0.006) : Infinity;
+    const s1 = HOME_STATIONS[stnKeys[0]] || { name: stnKeys[0], code: stnKeys[0] };
+    const s2 = stnKeys[1] ? (HOME_STATIONS[stnKeys[1]] || { name: stnKeys[1], code: stnKeys[1] }) : s1;
+    const nearest = godDist < fncDist ? { name: s1.name, code: s1.code, dist: godDist } : { name: s2.name, code: s2.code, dist: fncDist };
     const bikeMinutes = Math.round(nearest.dist / 0.25); // ~15km/h average cycling = 0.25km/min
     const walkMinutes = Math.round(nearest.dist / 0.083); // ~5km/h walking = 0.083km/min
     return { ...nearest, bikeMinutes, walkMinutes };
-  }, [userLoc]);
+  }, [userLoc, locLabel]);
   const afterSchool = AFTER_SCHOOL[planDate.getDay()];
   const peSession = tt.sessions.find(s => s.pe);
   const dayActivities = [peSession, showAfterSchool ? afterSchool : null].filter(Boolean);
@@ -588,10 +980,10 @@ export default function App() {
     setTrainError(false);
     try {
       const [godTo, godFrom, fncTo, fncFrom] = await Promise.all([
-        fetch(`${HUXLEY}/departures/GOD/to/${SCHOOL_STATION_CODE}/15?expand=true`),
-        fetch(`${HUXLEY}/departures/${SCHOOL_STATION_CODE}/to/GOD/15?expand=true`),
-        fetch(`${HUXLEY}/departures/FNC/to/${SCHOOL_STATION_CODE}/15?expand=true`),
-        fetch(`${HUXLEY}/departures/${SCHOOL_STATION_CODE}/to/FNC/15?expand=true`),
+        fetch(trainUrl("GOD", SCHOOL_STATION_CODE)),
+        fetch(trainUrl(SCHOOL_STATION_CODE, "GOD")),
+        fetch(trainUrl("FNC", SCHOOL_STATION_CODE)),
+        fetch(trainUrl(SCHOOL_STATION_CODE, "FNC")),
       ]);
       const [godToD, godFromD, fncToD, fncFromD] = await Promise.all([godTo.json(), godFrom.json(), fncTo.json(), fncFrom.json()]);
 
@@ -613,18 +1005,33 @@ export default function App() {
       setAlerts(godToD.nrccMessages ? godToD.nrccMessages.map(m => typeof m === "string" ? m : m.value || "") : []);
       setLastRef(new Date());
 
+      // Extract bus replacement services
+      const busInfo = [];
+      const checkBus = (data, from, to, route) => {
+        if (data.busServices && data.busServices.length > 0) {
+          busInfo.push({ route, from, to, count: data.busServices.length });
+        }
+      };
+      checkBus(godToD, "Godalming", SCHOOL_STATION, "GOD\u2192" + SCHOOL_STATION_CODE);
+      checkBus(godFromD, SCHOOL_STATION, "Godalming", SCHOOL_STATION_CODE + "\u2192GOD");
+      checkBus(fncToD, "Farncombe", SCHOOL_STATION, "FNC\u2192" + SCHOOL_STATION_CODE);
+      checkBus(fncFromD, SCHOOL_STATION, "Farncombe", SCHOOL_STATION_CODE + "\u2192FNC");
+
       // Fetch Sandhurst (Ruby) trains
       try {
         const [wokSnd, sndGld] = await Promise.all([
-          fetch(`${HUXLEY}/departures/${SCHOOL_STATION_CODE}/to/${RUBY_STATION_CODE}/10?expand=true`),
-          fetch(`${HUXLEY}/departures/${RUBY_STATION_CODE}/to/GLD/10?expand=true`),
+          fetch(trainUrl(SCHOOL_STATION_CODE, RUBY_STATION_CODE, 10)),
+          fetch(trainUrl(RUBY_STATION_CODE, "GLD", 10)),
         ]);
         const [wokSndD, sndGldD] = await Promise.all([wokSnd.json(), sndGld.json()]);
         setTrainsSND({
           toRuby: addArrival(wokSndD.trainServices, RUBY_STATION_CODE),
           fromRuby: addArrival(sndGldD.trainServices, "GLD"),
         });
+        checkBus(wokSndD, SCHOOL_STATION, RUBY_STATION, SCHOOL_STATION_CODE + "\u2192" + RUBY_STATION_CODE);
+        checkBus(sndGldD, RUBY_STATION, "Guildford", RUBY_STATION_CODE + "\u2192GLD");
       } catch (e) { console.error("Sandhurst trains:", e); }
+      setBusAlerts(busInfo);
     } catch (e) { console.error(e); setTrainError(true); }
   }, []);
 
@@ -634,14 +1041,16 @@ export default function App() {
     return () => { clearInterval(t1); clearInterval(t2); };
   }, [fetchWx, fetchTrains]);
 
-  useEffect(() => setSelTrain(null), [planDate, dir]);
+  useEffect(() => setSelTrain(null), [planDate, dir, travelMode]);
 
-  useEffect(() => { localStorage.setItem('ttc_safety', JSON.stringify(safetyHistory)); }, [safetyHistory]);
   useEffect(() => { localStorage.setItem('ttc_delayrep', JSON.stringify(delayRepayHistory)); }, [delayRepayHistory]);
   useEffect(() => { localStorage.setItem('ttc_costs', JSON.stringify(costLog)); }, [costLog]);
   useEffect(() => { localStorage.setItem('ttc_commute', JSON.stringify(commuteLog)); }, [commuteLog]);
   useEffect(() => { if (customTT) localStorage.setItem('ttc_custom_tt', JSON.stringify(customTT)); }, [customTT]);
   useEffect(() => { localStorage.setItem('ttc_exams', JSON.stringify(examTT)); }, [examTT]);
+  useEffect(() => { localStorage.setItem('ttc_rides', JSON.stringify(rides)); }, [rides]);
+  useEffect(() => { localStorage.setItem('ttc_pbs', JSON.stringify(pbs)); }, [pbs]);
+  useEffect(() => { localStorage.setItem('ttc_ride_model', JSON.stringify(rideModel)); }, [rideModel]);
 
   useEffect(() => {
     fetch('https://www.gov.uk/bank-holidays.json')
@@ -653,6 +1062,114 @@ export default function App() {
       .catch(() => {});
   }, []);
 
+  // ═══════════════════════════════════════════════════════════
+  // RIDE TRACKING — GPS geofence state machine
+  // ═══════════════════════════════════════════════════════════
+  const rideStateRef = useRef(rideState);
+  useEffect(() => { rideStateRef.current = rideState; }, [rideState]);
+  const wxRef = useRef({ temp: 10, rain: false, wind: 0 });
+
+  const identifyZone = useCallback((lat, lon) => {
+    const zones = getZones();
+    for (const [name, coords] of Object.entries(zones)) {
+      if (coords.lat === 0 && coords.lon === 0) continue;
+      const dist = haversine(lat, lon, coords.lat, coords.lon);
+      if (dist < GEOFENCE_RADIUS_KM) return name;
+    }
+    return null;
+  }, []);
+
+  const updateRideModel = useCallback((segment, allRides) => {
+    const segRides = allRides.filter(r => r.segment === segment).slice(-20);
+    if (segRides.length === 0) return;
+    const secs = segRides.map(r => r.durationSecs).sort((a, b) => a - b);
+    const avgSecs = Math.round(secs.reduce((a, b) => a + b, 0) / secs.length);
+    const p75Idx = Math.min(Math.floor(secs.length * 0.75), secs.length - 1);
+    const p75Secs = secs[p75Idx];
+    const wetRides = segRides.filter(r => r.weather?.rain);
+    const dryRides = segRides.filter(r => !r.weather?.rain);
+    const wetAvgSecs = wetRides.length >= 3 ? Math.round(wetRides.reduce((a, r) => a + r.durationSecs, 0) / wetRides.length) : null;
+    const dryAvgSecs = dryRides.length >= 3 ? Math.round(dryRides.reduce((a, r) => a + r.durationSecs, 0) / dryRides.length) : null;
+    setRideModel(prev => ({ ...prev, [segment]: { avgSecs, p75Secs, wetAvgSecs, dryAvgSecs, count: segRides.length } }));
+  }, []);
+
+  const handleRideComplete = useCallback((segment, durationSecs) => {
+    const weather = wxRef.current;
+    const newRide = {
+      segment, date: fmtDate(new Date()), durationSecs,
+      weather: { temp: weather.temp, rain: weather.rain, wind: weather.wind },
+      dayOfWeek: new Date().getDay(), timestamp: Date.now(),
+    };
+    const updatedRides = [...rides, newRide];
+    setRides(updatedRides);
+    updateRideModel(segment, updatedRides);
+
+    const currentPb = pbs[segment];
+    if (!currentPb || durationSecs < currentPb.bestSecs) {
+      const improvement = currentPb ? currentPb.bestSecs - durationSecs : 0;
+      setPbs(prev => ({ ...prev, [segment]: { bestSecs: durationSecs, date: fmtDate(new Date()) } }));
+      setPbCelebration({ type: "pb", segment, time: durationSecs, improvement, label: RIDE_SEGMENTS[segment]?.label || segment });
+      setTimeout(() => setPbCelebration(null), 5000);
+    } else if (currentPb && durationSecs <= currentPb.bestSecs * 1.1) {
+      const diff = durationSecs - currentPb.bestSecs;
+      setPbCelebration({ type: "near", segment, time: durationSecs, diff, label: RIDE_SEGMENTS[segment]?.label || segment });
+      setTimeout(() => setPbCelebration(null), 5000);
+    }
+  }, [rides, pbs, updateRideModel]);
+
+  useEffect(() => {
+    if (!userLoc) return;
+    const zone = identifyZone(userLoc.lat, userLoc.lon);
+    const rs = rideStateRef.current;
+
+    if (rs.status === "idle") {
+      if (zone) {
+        if (rs.zone !== zone) setRideState(prev => ({ ...prev, zone }));
+      } else if (rs.zone) {
+        setRideState({ status: "riding", zone: null, startTime: Date.now(), startZone: rs.zone });
+      }
+    } else if (rs.status === "riding") {
+      if (zone) {
+        if (zone === rs.startZone) {
+          setRideState({ status: "idle", zone, startTime: null, startZone: null });
+        } else {
+          const durationSecs = Math.round((Date.now() - rs.startTime) / 1000);
+          const durationMins = durationSecs / 60;
+          if (durationMins >= 1 && durationMins <= 60) {
+            const segKey = ZONE_TO_SEGMENT[`${rs.startZone}_${zone}`];
+            if (segKey) {
+              handleRideComplete(segKey, durationSecs);
+            }
+          }
+          setRideState({ status: "idle", zone, startTime: null, startZone: null });
+        }
+      }
+    }
+  }, [userLoc, identifyZone, handleRideComplete]);
+
+  // ═══════════════════════════════════════════════════════════
+  // ADAPTIVE DEPARTURE MODEL
+  // ═══════════════════════════════════════════════════════════
+  const getLearnedBikeMins = useCallback((segmentKey, isWet) => {
+    const model = rideModel[segmentKey];
+    const seg = RIDE_SEGMENTS[segmentKey];
+    if (!model || !seg) return null;
+    if (model.count < 3) return null;
+
+    let learnedSecs;
+    if (isWet && model.wetAvgSecs) learnedSecs = model.wetAvgSecs;
+    else if (!isWet && model.dryAvgSecs) learnedSecs = model.dryAvgSecs;
+    else learnedSecs = model.p75Secs; // conservative fallback
+
+    const learnedMins = Math.ceil(learnedSecs / 60);
+    const staticMins = seg.defaultMins;
+
+    if (model.count < 10) {
+      return Math.ceil((staticMins + learnedMins) / 2); // 50/50 blend
+    }
+    return learnedMins;
+  }, [rideModel]);
+
   // Weather for plan date
   const daysFromNow = Math.round((planDate - dayClone(now)) / 864e5);
   const wxIdx = Math.min(Math.max(daysFromNow, 0), (wx?.daily?.temperature_2m_max?.length || 1) - 1);
@@ -663,13 +1180,19 @@ export default function App() {
   const curPrecip = wx?.current?.precipitation ?? 0;
   const curRain = curPrecip > 0 || (curCode >= 51 && curCode <= 82);
 
+  // Keep wxRef in sync for ride tagging
+  useEffect(() => { wxRef.current = { temp: curTemp, rain: curRain, wind: curWind }; }, [curTemp, curRain, curWind]);
+
   const pTemp = isFuture && wx?.daily ? Math.round(((wx.daily.temperature_2m_min?.[wxIdx] || 5) * 0.4 + (wx.daily.temperature_2m_max?.[wxIdx] || 15) * 0.6)) : curTemp;
   const pRain = isFuture && wx?.daily ? (wx.daily.precipitation_probability_max?.[wxIdx] || 0) > 30 : curRain;
   const pWxCode = isFuture && wx?.daily ? wx.daily.weather_code?.[wxIdx] ?? 0 : curCode;
   const pDark = (() => { const si = wx?.daily?.sunrise?.[wxIdx]; if (!si) return true; return new Date(si).getHours() >= 8; })();
 
   const bikeAdj = (pRain ? 3 : 0) + (curWind > 30 ? 5 : curWind > 20 ? 3 : 0);
-  const bSS = BIKE_STN_SCHOOL.mins + Math.ceil(bikeAdj / 2);
+  const bSSSegKey = dir === "to" ? "wok_to_college" : "college_to_wok";
+  const learnedBSS = getLearnedBikeMins(bSSSegKey, pRain);
+  const bSS = learnedBSS !== null ? learnedBSS : BIKE_STN_SCHOOL.mins + Math.ceil(bikeAdj / 2);
+  const bSSLearned = learnedBSS !== null;
   const clothing = clothe(pTemp, pRain, curWind, pDark);
 
   // Safety calculations
@@ -682,6 +1205,12 @@ export default function App() {
   const isSaturday = planDate.getDay() === 6;
   const isSunday = planDate.getDay() === 0;
   const isWeekendRuby = isFriday || isSaturday || isSunday;
+  // Actual current day (for Ruby card display — planDate may differ from today)
+  const nowDayOfWeek = now.getDay();
+  const isSaturdayNow = nowDayOfWeek === 6;
+  const isSundayNow = nowDayOfWeek === 0;
+  const isFridayNow = nowDayOfWeek === 5;
+  const isWeekendRubyNow = isFridayNow || isSaturdayNow || isSundayNow;
 
   const rubyToTrain = useMemo(() => {
     if (!isFriday || !hasClass) return null;
@@ -717,6 +1246,12 @@ export default function App() {
 
   // Merge trains from both home stations into one sorted list
   const allTrains = useMemo(() => {
+    if (travelMode === "college_to_ruby") {
+      return (trainsSND.toRuby || []).map(t => ({ ...t, stnKey: "SND" }));
+    }
+    if (travelMode === "ruby_to_home") {
+      return (trainsSND.fromRuby || []).map(t => ({ ...t, stnKey: "SND" }));
+    }
     const godT = dir === "to" ? trainsGOD.to : trainsGOD.from;
     const fncT = dir === "to" ? trainsFNC.to : trainsFNC.from;
     const merged = [
@@ -728,7 +1263,7 @@ export default function App() {
       return (ta || 0) - (tb || 0);
     });
     return merged;
-  }, [dir, trainsGOD, trainsFNC, planDate]);
+  }, [dir, travelMode, trainsGOD, trainsFNC, trainsSND, planDate]);
 
   const arriveByStr = tt.start || "08:45";
   const finishStr = effectiveEnd || "15:15";
@@ -737,6 +1272,30 @@ export default function App() {
 
   // Auto-select best train from combined list
   const autoTrain = useMemo(() => {
+    // college_to_ruby: first catchable train after college finishes + bike to WOK
+    if (travelMode === "college_to_ruby") {
+      if (!isToday) return null; // Live trains are for today only
+      for (const t of allTrains) {
+        if (t.etd === "Cancelled") continue;
+        const dep = parseTT(t.std, planDate);
+        if (!dep) continue;
+        if (dep >= addM(finishAt, bSS + BUF)) return t;
+      }
+      return null;
+    }
+    // ruby_to_home: first train after leaving Ruby's + bike to SND
+    if (travelMode === "ruby_to_home") {
+      if (!isToday) return null; // Live trains are for today only
+      const leaveTime = makeT(planDate, hm(SUNDAY_LEAVE_RUBY).h, hm(SUNDAY_LEAVE_RUBY).m);
+      const atStation = addM(leaveTime, BIKE_STN_RUBY.mins + BUF);
+      for (const t of allTrains) {
+        if (t.etd === "Cancelled") continue;
+        const dep = parseTT(t.std, planDate);
+        if (!dep) continue;
+        if (dep >= atStation) return t;
+      }
+      return null;
+    }
     if (dir === "to") {
       let best = null;
       for (const t of allTrains) {
@@ -772,14 +1331,22 @@ export default function App() {
       if (dep >= addM(finishAt, bSS + BUF)) return t;
     }
     return null;
-  }, [dir, allTrains, planDate, arriveBy, finishAt, bikeAdj, bSS, isToday, now]);
+  }, [dir, travelMode, allTrains, planDate, arriveBy, finishAt, bikeAdj, bSS, isToday, now]);
 
   const activeTrain = selTrain ? allTrains.find(t => trainKey(t) === selTrain) : autoTrain;
 
   // Derive station from active train
-  const activeStn = activeTrain ? HOME_STATIONS[activeTrain.stnKey] : HOME_STATIONS[DEFAULT_HOME_STATION];
-  const bHS = activeStn.bikeMins + bikeAdj;
-  const bSH = activeStn.bikeMins + bikeAdj;
+  const activeStn = isRubyRoute
+    ? { name: RUBY_STATION, code: RUBY_STATION_CODE, bikeMi: BIKE_STN_RUBY.mi, bikeMins: BIKE_STN_RUBY.mins }
+    : activeTrain ? HOME_STATIONS[activeTrain.stnKey] : HOME_STATIONS[DEFAULT_HOME_STATION];
+  const bHSSegKey = activeStn?.code === "FNC" ? "home_to_fnc" : activeStn?.code === "SND" ? "ruby_to_snd" : "home_to_god";
+  const bSHSegKey = activeStn?.code === "FNC" ? "fnc_to_home" : activeStn?.code === "SND" ? "snd_to_ruby" : "god_to_home";
+  const learnedBHS = getLearnedBikeMins(bHSSegKey, pRain);
+  const learnedBSH = getLearnedBikeMins(bSHSegKey, pRain);
+  const bHS = learnedBHS !== null ? learnedBHS : activeStn.bikeMins + bikeAdj;
+  const bSH = learnedBSH !== null ? learnedBSH : activeStn.bikeMins + bikeAdj;
+  const bHSLearned = learnedBHS !== null;
+  const bSHLearned = learnedBSH !== null;
 
   // Train before and after the active train
   const activeIdx = activeTrain ? allTrains.findIndex(t => trainKey(t) === trainKey(activeTrain)) : -1;
@@ -788,6 +1355,28 @@ export default function App() {
 
   // Journey calculation
   const J = useMemo(() => {
+    // college_to_ruby: College → bike → WOK → train → SND → bike → Ruby's
+    if (travelMode === "college_to_ruby") {
+      const tDep = activeTrain
+        ? (parseTT(activeTrain.etd === "On time" ? activeTrain.std : activeTrain.etd, planDate) || parseTT(activeTrain.std, planDate))
+        : addM(finishAt, bSS + BUF);
+      const leaveCollege = addM(tDep, -(bSS + BUF));
+      const arrSnd = (activeTrain?.arrTime ? parseTT(activeTrain.arrTime, planDate) : null) || addM(tDep, RUBY_TRAIN_MINS);
+      const trainMinsActual = diffM(arrSnd, tDep);
+      const arrRuby = addM(arrSnd, BIKE_STN_RUBY.mins);
+      return { mode: "college_to_ruby", leaveCollege, tDep, arrSnd, arrRuby, trainMins: trainMinsActual, tStr: activeTrain?.std || fmt(tDep), arrStnStr: activeTrain?.arrTime || null };
+    }
+    // ruby_to_home: Ruby's → bike → SND → train → GLD → change → GOD/FNC → bike → Home
+    if (travelMode === "ruby_to_home") {
+      const tDep = activeTrain
+        ? (parseTT(activeTrain.etd === "On time" ? activeTrain.std : activeTrain.etd, planDate) || parseTT(activeTrain.std, planDate))
+        : addM(makeT(planDate, hm(SUNDAY_LEAVE_RUBY).h, hm(SUNDAY_LEAVE_RUBY).m), BIKE_STN_RUBY.mins + BUF);
+      const leaveRuby = addM(tDep, -(BIKE_STN_RUBY.mins + BUF));
+      const arrGld = (activeTrain?.arrTime ? parseTT(activeTrain.arrTime, planDate) : null) || addM(tDep, RUBY_RETURN_TRAIN_MINS);
+      const trainMinsActual = diffM(arrGld, tDep);
+      const arrHome = addM(arrGld, GLD_CONNECTION_MINS + GLD_TO_HOME_TRAIN_MINS + HOME_STATIONS[DEFAULT_HOME_STATION].bikeMins);
+      return { mode: "ruby_to_home", leaveRuby, tDep, arrGld, arrHome, trainMins: trainMinsActual, tStr: activeTrain?.std || fmt(tDep), arrStnStr: activeTrain?.arrTime || null };
+    }
     if (dir === "to") {
       const tDep = activeTrain
         ? (parseTT(activeTrain.etd === "On time" ? activeTrain.std : activeTrain.etd, planDate) || parseTT(activeTrain.std, planDate))
@@ -806,10 +1395,14 @@ export default function App() {
     const trainMinsActual = diffM(arrStn, tDep);
     const arrHome = addM(arrStn, bSH);
     return { leaveSchool, tDep, arrStn, arrHome, tStr: activeTrain?.std || fmt(tDep), trainMins: trainMinsActual, arrStnStr: activeTrain?.arrTime || null };
-  }, [dir, activeTrain, planDate, bHS, bSS, bSH, arriveBy, finishAt, arriveByStr]);
+  }, [dir, travelMode, activeTrain, planDate, bHS, bSS, bSH, arriveBy, finishAt, arriveByStr]);
 
-  const countdown = isToday ? diffM(dir === "to" ? J.leave : J.leaveSchool, now) : null;
-  const sts = allTrains.some(t => t.etd === "Cancelled") ? "danger" : allTrains.some(t => t.etd !== "On time" && t.etd !== t.std && t.etd !== "\u2014") ? "warning" : "good";
+  const countdown = isToday ? diffM(
+    travelMode === "college_to_ruby" ? J.leaveCollege :
+    travelMode === "ruby_to_home" ? J.leaveRuby :
+    dir === "to" ? J.leave : J.leaveSchool, now
+  ) : null;
+  const sts = allTrains.some(t => t.etd === "Cancelled") ? "danger" : busAlerts.length > 0 ? "warning" : allTrains.some(t => t.etd !== "On time" && t.etd !== t.std && t.etd !== "\u2014") ? "warning" : "good";
 
   const dateBtns = useMemo(() => {
     const arr = [];
@@ -822,35 +1415,59 @@ export default function App() {
   }, [now, manualDate, planDate]);
 
   // Trainline booking URL
+  // Trainline URN station IDs
+  const TL_STNS = { GOD: "GOD5629gb", FNC: "FNC5558gb", WOK: "WOK5701gb", SND: "SND5646gb", GLD: "GLD5584gb" };
+  const TL_RAILCARD = "eab6a7078be95d5bf04bb0b2a5ddc49efbaca253"; // 16-25 Railcard
+  const TL_DOB = "2008-01-01"; // Tom's passenger DOB
+  const buildTrainlineUrl = (depCode, arrCode, dateTime) => {
+    const origin = `urn:trainline:generic:loc:${TL_STNS[depCode] || depCode}`;
+    const dest = `urn:trainline:generic:loc:${TL_STNS[arrCode] || arrCode}`;
+    return `https://www.thetrainline.com/book/results?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(dest)}&outwardDate=${encodeURIComponent(dateTime)}&outwardDateType=departAfter&journeySearchType=single&passengers%5B%5D=${TL_DOB}&passengerDiscountCards%5B%5D=${TL_RAILCARD}&directSearch=false&splitSave=true&transportModes%5B%5D=mixed`;
+  };
+
   const trainlineUrl = useMemo(() => {
-    const depName = dir === "to" ? (activeStn?.name || "Godalming") : SCHOOL_STATION;
-    const arrName = dir === "to" ? SCHOOL_STATION : (activeStn?.name || "Godalming");
-    const timeStr = activeTrain?.std || (dir === "to" ? fmt(J.tDep) : fmt(J.tDep));
+    let depCode, arrCode;
+    if (travelMode === "college_to_ruby") {
+      depCode = SCHOOL_STATION_CODE; arrCode = RUBY_STATION_CODE;
+    } else if (travelMode === "ruby_to_home") {
+      depCode = RUBY_STATION_CODE; arrCode = "GOD";
+    } else {
+      depCode = dir === "to" ? (activeStn?.code || "GOD") : SCHOOL_STATION_CODE;
+      arrCode = dir === "to" ? SCHOOL_STATION_CODE : (activeStn?.code || "GOD");
+    }
+    const timeStr = activeTrain?.std || fmt(J.tDep);
     const dt = fmtDate(planDate) + "T" + timeStr.slice(0,5) + ":00";
-    return `https://www.thetrainline.com/book/results?journeySearchType=single&origin=${encodeURIComponent(depName)}&destination=${encodeURIComponent(arrName)}&outwardDate=${encodeURIComponent(dt)}&outwardDateType=departAfter&passengers%5B0%5D=2008-01-01&directSearch=false&selectedTab=train&lang=en`;
-  }, [dir, activeStn, planDate, activeTrain, J]);
+    return buildTrainlineUrl(depCode, arrCode, dt);
+  }, [dir, travelMode, activeStn, planDate, activeTrain, J]);
 
   const rubyTrainlineUrl = useMemo(() => {
     if (isFriday && rubyToTrain) {
       const dt = fmtDate(planDate) + "T" + rubyToTrain.std + ":00";
-      return `https://www.thetrainline.com/book/results?journeySearchType=single&origin=${encodeURIComponent(SCHOOL_STATION)}&destination=${encodeURIComponent(RUBY_STATION)}&outwardDate=${encodeURIComponent(dt)}&outwardDateType=departAfter&passengers%5B0%5D=2008-01-01&directSearch=false&selectedTab=train&lang=en`;
+      return buildTrainlineUrl(SCHOOL_STATION_CODE, RUBY_STATION_CODE, dt);
     }
     if (isSunday && rubyFromTrain) {
       const dt = fmtDate(planDate) + "T" + rubyFromTrain.std + ":00";
-      return `https://www.thetrainline.com/book/results?journeySearchType=single&origin=${encodeURIComponent(RUBY_STATION)}&destination=${encodeURIComponent("Godalming")}&outwardDate=${encodeURIComponent(dt)}&outwardDateType=departAfter&passengers%5B0%5D=2008-01-01&directSearch=false&selectedTab=train&lang=en`;
+      return buildTrainlineUrl(RUBY_STATION_CODE, "GOD", dt);
     }
     return null;
   }, [isFriday, isSunday, rubyToTrain, rubyFromTrain, planDate]);
 
   // National Rail live departures URL
   const liveTrainsUrl = useMemo(() => {
-    const stnSlugs = { GOD: "godalming", FNC: "farncombe", WOK: "woking", SND: "sandhurst" };
-    const depCode = dir === "to" ? (activeStn?.code || "GOD") : SCHOOL_STATION_CODE;
-    const arrCode = dir === "to" ? SCHOOL_STATION_CODE : (activeStn?.code || "GOD");
+    const stnSlugs = { GOD: "godalming", FNC: "farncombe", WOK: "woking", SND: "sandhurst", GLD: "guildford" };
+    let depCode, arrCode;
+    if (travelMode === "college_to_ruby") {
+      depCode = SCHOOL_STATION_CODE; arrCode = RUBY_STATION_CODE;
+    } else if (travelMode === "ruby_to_home") {
+      depCode = RUBY_STATION_CODE; arrCode = "GLD";
+    } else {
+      depCode = dir === "to" ? (activeStn?.code || "GOD") : SCHOOL_STATION_CODE;
+      arrCode = dir === "to" ? SCHOOL_STATION_CODE : (activeStn?.code || "GOD");
+    }
     const depSlug = stnSlugs[depCode] || depCode.toLowerCase();
     const arrSlug = stnSlugs[arrCode] || arrCode.toLowerCase();
     return `https://www.nationalrail.co.uk/live-trains/departures/${depSlug}/${arrSlug}/`;
-  }, [dir, activeStn]);
+  }, [dir, travelMode, activeStn]);
 
   // Delay Repay detection — check if active train is 15+ min late
   useEffect(() => {
@@ -860,12 +1477,20 @@ export default function App() {
     if (!scheduled || !expected) return;
     const delayMins = diffM(expected, scheduled);
     if (delayMins >= 15 && !delayRepayDismissed.includes(trainKey(activeTrain))) {
+      let from, fromCode, to, toCode;
+      if (travelMode === "college_to_ruby") {
+        from = SCHOOL_STATION; fromCode = SCHOOL_STATION_CODE; to = RUBY_STATION; toCode = RUBY_STATION_CODE;
+      } else if (travelMode === "ruby_to_home") {
+        from = RUBY_STATION; fromCode = RUBY_STATION_CODE; to = "Guildford"; toCode = "GLD";
+      } else {
+        from = dir === "to" ? (activeStn?.name || "Godalming") : SCHOOL_STATION;
+        fromCode = dir === "to" ? (activeStn?.code || "GOD") : SCHOOL_STATION_CODE;
+        to = dir === "to" ? SCHOOL_STATION : (activeStn?.name || "Godalming");
+        toCode = dir === "to" ? SCHOOL_STATION_CODE : (activeStn?.code || "GOD");
+      }
       setDelayRepayModal({
         date: fmtDate(planDate),
-        from: dir === "to" ? (activeStn?.name || "Godalming") : SCHOOL_STATION,
-        fromCode: dir === "to" ? (activeStn?.code || "GOD") : SCHOOL_STATION_CODE,
-        to: dir === "to" ? SCHOOL_STATION : (activeStn?.name || "Godalming"),
-        toCode: dir === "to" ? SCHOOL_STATION_CODE : (activeStn?.code || "GOD"),
+        from, fromCode, to, toCode,
         scheduled: activeTrain.std,
         expected: activeTrain.etd,
         delayMins,
@@ -873,7 +1498,7 @@ export default function App() {
         trainId: trainKey(activeTrain),
       });
     }
-  }, [activeTrain, isToday, delayRepayDismissed]);
+  }, [activeTrain, isToday, delayRepayDismissed, travelMode]);
 
   // Auto-log commute when Tom arrives (geolocation-based)
   useEffect(() => {
@@ -955,17 +1580,6 @@ export default function App() {
     setCostLog(prev => [...prev, entry]);
     setCostInput('');
     setShowCostEntry(false);
-  };
-
-  // Arrived safely handler
-  const sendArrivedSafely = () => {
-    const msg = `Hi ${SAFETY_CONTACT_NAME}, Tom has arrived safely at ${SCHOOL_NAME}. ${fmt(new Date())}`;
-    const smsUrl = `sms:${SAFETY_CONTACT}?body=${encodeURIComponent(msg)}`;
-    window.open(smsUrl, '_blank');
-    const entry = { date: fmtDate(new Date()), time: fmt(new Date()), location: locLabel || "College" };
-    setSafetyHistory(prev => [entry, ...prev].slice(0, 50));
-    setShowSafetyConfirm(true);
-    setTimeout(() => setShowSafetyConfirm(false), 3000);
   };
 
   // Commute stats calculations
@@ -1057,6 +1671,38 @@ export default function App() {
         }
       `}</style>
 
+      {/* PB CELEBRATION */}
+      {pbCelebration && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999, animation: "slideIn .3s", padding: "0 16px" }}>
+          <div style={{
+            maxWidth: 500, margin: "16px auto", padding: "16px 20px", borderRadius: 16,
+            background: pbCelebration.type === "pb"
+              ? "linear-gradient(135deg, rgba(245,158,11,.95), rgba(234,179,8,.9))"
+              : "linear-gradient(135deg, rgba(245,158,11,.85), rgba(251,146,60,.8))",
+            boxShadow: "0 8px 40px rgba(245,158,11,.4)", textAlign: "center",
+          }}>
+            <div style={{ fontSize: 28, marginBottom: 4 }}>{pbCelebration.type === "pb" ? "\uD83D\uDC51" : "\uD83D\uDD25"}</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#0f172a" }}>
+              {pbCelebration.type === "pb" ? "NEW PERSONAL BEST!" : "SO CLOSE!"}
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginTop: 2 }}>{pbCelebration.label}</div>
+            <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: "#0f172a", marginTop: 4 }}>
+              {Math.floor(pbCelebration.time / 60)}:{String(pbCelebration.time % 60).padStart(2, "0")}
+            </div>
+            <div style={{ fontSize: 12, color: "#1e293b", marginTop: 4 }}>
+              {pbCelebration.type === "pb" && pbCelebration.improvement > 0
+                ? `${pbCelebration.improvement} seconds faster than previous best!`
+                : pbCelebration.type === "pb" ? "First recorded ride \u2014 this is your benchmark!"
+                : `Just ${pbCelebration.diff}s off your PB!`}
+            </div>
+            <button onClick={() => setPbCelebration(null)} style={{
+              marginTop: 8, padding: "4px 14px", borderRadius: 8, border: "1px solid rgba(0,0,0,.2)",
+              backgroundColor: "rgba(0,0,0,.1)", color: "#1e293b", fontSize: 11, fontWeight: 700, cursor: "pointer",
+            }}>Dismiss</button>
+          </div>
+        </div>
+      )}
+
       <div className="app-wrap" style={{ maxWidth: 920, margin: "0 auto", padding: "16px 16px 40px" }}>
 
         {/* HEADER */}
@@ -1064,7 +1710,15 @@ export default function App() {
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 4, color: "#818cf8", textTransform: "uppercase" }}>{"\uD83D\uDEB2"} Tom's Travel Companion {"\uD83D\uDE82"}</div>
           <div className="header-time" style={{ fontSize: 42, fontWeight: 900, letterSpacing: -1, fontFamily: "'JetBrains Mono',monospace", background: "linear-gradient(135deg,#e2e8f0,#818cf8,#6ee7b7)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>{fmt(now)}</div>
           <div style={{ fontSize: 12, color: "#64748b" }}>{fmtLong(now)}</div>
-          {locLabel && <div style={{ fontSize: 10, color: "#6ee7b7", marginTop: 2 }}>{"\uD83D\uDCCD"} {locLabel}{liveStationETA && locLabel !== "At college" && locLabel !== "Near college" ? ` \u2022 ${liveStationETA.bikeMinutes}min bike to ${liveStationETA.name}` : ""}</div>}
+          {locLabel && <div style={{ fontSize: 10, color: "#6ee7b7", marginTop: 2 }}>{"\uD83D\uDCCD"} {locLabel}{liveStationETA && locLabel !== "At college" && locLabel !== "Near college" && liveStationETA.bikeMinutes > 0 && liveStationETA.bikeMinutes < 60 ? ` \u2022 ${liveStationETA.bikeMinutes}min bike to ${liveStationETA.name}` : ""}</div>}
+          {rideState.status === "riding" && (
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 4, padding: "4px 12px", borderRadius: 20, backgroundColor: "rgba(16,185,129,.12)", border: "1px solid rgba(16,185,129,.3)" }}>
+              <Pulse c="#22c55e" />
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#6ee7b7" }}>{"\uD83D\uDEB2"} Riding</span>
+              <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace", color: "#e2e8f0" }}>{Math.floor((now - rideState.startTime) / 60000)}:{String(Math.floor(((now - rideState.startTime) / 1000) % 60)).padStart(2, "0")}</span>
+              <span style={{ fontSize: 9, color: "#94a3b8" }}>from {rideState.startZone}</span>
+            </div>
+          )}
         </div>
 
         {/* OPTIONAL FEATURE TOGGLES */}
@@ -1105,7 +1759,7 @@ export default function App() {
             </div>
             {/* Direction selector */}
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              {[{ v: null, l: "Auto" }, { v: "to", l: "\u2192 College" }, { v: "from", l: `\u2192 Home` }].map(o => (
+              {[{ v: null, l: "Auto" }, { v: "to", l: "\u2192 College" }, { v: "from", l: "\u2192 Home" }, { v: "toRuby", l: "\u2192 Ruby's" }, { v: "fromRuby", l: "Ruby's \u2192" }].map(o => (
                 <button key={o.v || "auto"} onClick={() => setManualDir(o.v)} style={{
                   padding: "5px 10px", borderRadius: 8, cursor: "pointer", fontSize: 10, fontWeight: 600,
                   backgroundColor: manualDir === o.v ? "rgba(99,102,241,.2)" : "rgba(30,41,59,.5)",
@@ -1129,20 +1783,26 @@ export default function App() {
         )}
 
         {/* COUNTDOWN (today only) */}
-        {isToday && hasClass && inTerm && countdown !== null && (
+        {isToday && ((hasClass && inTerm) || isRubyRoute) && countdown !== null && (
           <div style={{
             animation: "slideIn .5s", marginBottom: 14, padding: "14px 20px", borderRadius: 14, textAlign: "center",
-            background: countdown <= 0 ? "linear-gradient(135deg,rgba(239,68,68,.2),rgba(185,28,28,.2))" : countdown <= 15 ? "linear-gradient(135deg,rgba(245,158,11,.2),rgba(180,83,9,.2))" : "linear-gradient(135deg,rgba(16,185,129,.15),rgba(6,78,59,.2))",
-            border: `1px solid ${countdown <= 0 ? "rgba(239,68,68,.4)" : countdown <= 15 ? "rgba(245,158,11,.4)" : "rgba(16,185,129,.3)"}`,
+            background: countdown <= 0 ? "linear-gradient(135deg,rgba(239,68,68,.2),rgba(185,28,28,.2))" : countdown <= 15 ? "linear-gradient(135deg,rgba(245,158,11,.2),rgba(180,83,9,.2))" : isRubyRoute ? "linear-gradient(135deg,rgba(236,72,153,.15),rgba(168,85,247,.1))" : "linear-gradient(135deg,rgba(16,185,129,.15),rgba(6,78,59,.2))",
+            border: `1px solid ${countdown <= 0 ? "rgba(239,68,68,.4)" : countdown <= 15 ? "rgba(245,158,11,.4)" : isRubyRoute ? "rgba(236,72,153,.3)" : "rgba(16,185,129,.3)"}`,
           }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: "#94a3b8", marginBottom: 4 }}>
-              {dir === "to" ? (countdown <= 0 ? "\u26A0\uFE0F YOU SHOULD HAVE LEFT!" : countdown <= 5 ? "\uD83C\uDFC3 LEAVE NOW!" : countdown <= 15 ? "\uD83D\uDD14 LEAVING SOON" : "\u2705 YOU HAVE TIME") : "\uD83C\uDFE0 HEADING HOME"}
+              {travelMode === "college_to_ruby" ? "\u2764\uFE0F HEADING TO RUBY'S"
+                : travelMode === "ruby_to_home" ? "\u2764\uFE0F HEADING HOME FROM RUBY'S"
+                : dir === "to" ? (countdown <= 0 ? "\u26A0\uFE0F YOU SHOULD HAVE LEFT!" : countdown <= 5 ? "\uD83C\uDFC3 LEAVE NOW!" : countdown <= 15 ? "\uD83D\uDD14 LEAVING SOON" : "\u2705 YOU HAVE TIME") : "\uD83C\uDFE0 HEADING HOME"}
             </div>
-            <div className="countdown-time" style={{ fontSize: 28, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: countdown <= 0 ? "#fca5a5" : countdown <= 15 ? "#fcd34d" : "#6ee7b7" }}>
+            <div className="countdown-time" style={{ fontSize: 28, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: countdown <= 0 ? "#fca5a5" : countdown <= 15 ? "#fcd34d" : isRubyRoute ? "#f472b6" : "#6ee7b7" }}>
               {countdown <= 0 ? `${Math.abs(countdown)} min overdue` : `${countdown} min until you leave`}
             </div>
             <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>
-              {dir === "to"
+              {travelMode === "college_to_ruby"
+                ? <>Leave college by <strong style={{ color: "#f472b6" }}>{fmt(J.leaveCollege)}</strong> {"\u2192"} arrive Ruby's ~<strong style={{ color: "#e2e8f0" }}>{fmt(J.arrRuby)}</strong></>
+                : travelMode === "ruby_to_home"
+                ? <>Leave Ruby's by <strong style={{ color: "#f472b6" }}>{fmt(J.leaveRuby)}</strong> {"\u2192"} home by ~<strong style={{ color: "#e2e8f0" }}>{fmt(J.arrHome)}</strong></>
+                : dir === "to"
                 ? <>Leave by <strong style={{ color: "#e2e8f0" }}>{fmt(J.leave)}</strong> {"\u2192"} {tt.sessions[0].subj} starts <strong style={{ color: J.late ? "#fca5a5" : "#e2e8f0" }}>{arriveByStr}</strong></>
                 : <>Leave college {"\u2192"} home by <strong style={{ color: "#e2e8f0" }}>{fmt(J.arrHome)}</strong></>}
             </div>
@@ -1150,15 +1810,31 @@ export default function App() {
         )}
 
         {/* FUTURE PLAN BANNER */}
-        {isFuture && hasClass && inTerm && (
-          <div style={{ animation: "slideIn .5s", marginBottom: 14, padding: "16px 20px", borderRadius: 14, textAlign: "center", background: "linear-gradient(135deg,rgba(139,92,246,.12),rgba(99,102,241,.08))", border: "1px solid rgba(139,92,246,.2)" }}>
+        {isFuture && ((hasClass && inTerm) || isRubyRoute) && (
+          <div style={{ animation: "slideIn .5s", marginBottom: 14, padding: "16px 20px", borderRadius: 14, textAlign: "center", background: isRubyRoute ? "linear-gradient(135deg,rgba(236,72,153,.12),rgba(168,85,247,.08))" : "linear-gradient(135deg,rgba(139,92,246,.12),rgba(99,102,241,.08))", border: `1px solid ${isRubyRoute ? "rgba(236,72,153,.2)" : "rgba(139,92,246,.2)"}` }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>{modeLabel}</div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#a78bfa", marginBottom: 6 }}>
+            {!isRubyRoute && <div style={{ fontSize: 12, fontWeight: 700, color: "#a78bfa", marginBottom: 6 }}>
               {"\uD83D\uDCC5"} {fmtLong(planDate)} {"\u2014"} {tt.sessions.length} lesson{tt.sessions.length > 1 ? "s" : ""} ({tt.start} {"\u2013"} {tt.end})
               {showAfterSchool && afterSchool && <span style={{ color: "#6ee7b7" }}> + {afterSchool.name} until {afterSchool.time.split("-")[1]}</span>}
               {gymSlots.length > 0 && <span style={{ color: "#fcd34d" }}> {"\uD83C\uDFCB\uFE0F"} {gymSlots.length} gym slot{gymSlots.length > 1 ? "s" : ""}</span>}
-            </div>
-            {dir === "to" ? (
+            </div>}
+            {travelMode === "college_to_ruby" ? (
+              <>
+                <div className="future-leave" style={{ fontSize: 26, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: "#f472b6" }}>Leave college at {fmt(J.leaveCollege)}</div>
+                <div style={{ fontSize: 12, color: "#f472b6", marginTop: 4 }}>Heading to Ruby's in Sandhurst</div>
+                <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 6, lineHeight: 1.6 }}>
+                  {"\uD83C\uDFEB"} College {"\u2192"} {"\uD83D\uDEB2"} {bSS}min to Woking {"\u2192"} {"\uD83D\uDE82"} {J.tStr} train ({J.trainMins}min) {"\u2192"} arr {J.arrStnStr || fmt(J.arrSnd)} SND {"\u2192"} {"\uD83D\uDEB2"} {BIKE_STN_RUBY.mins}min {"\u2192"} {"\u2764\uFE0F"} Ruby's ~{fmt(J.arrRuby)}
+                </div>
+              </>
+            ) : travelMode === "ruby_to_home" ? (
+              <>
+                <div className="future-leave" style={{ fontSize: 26, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: "#f472b6" }}>Leave Ruby's at {fmt(J.leaveRuby)}</div>
+                <div style={{ fontSize: 12, color: "#f472b6", marginTop: 4 }}>Heading home via Guildford</div>
+                <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 6, lineHeight: 1.6 }}>
+                  {"\u2764\uFE0F"} Ruby's {"\u2192"} {"\uD83D\uDEB2"} {BIKE_STN_RUBY.mins}min to SND {"\u2192"} {"\uD83D\uDE82"} {J.tStr} train ({J.trainMins}min) {"\u2192"} arr {J.arrStnStr || fmt(J.arrGld)} GLD {"\u2192"} {"\uD83D\uDD04"} Change {"\u2192"} {"\uD83D\uDE82"} GOD/FNC {"\u2192"} {"\uD83D\uDEB2"} bike {"\u2192"} {"\uD83C\uDFE0"} Home ~{fmt(J.arrHome)}
+                </div>
+              </>
+            ) : dir === "to" ? (
               <>
                 <div className="future-leave" style={{ fontSize: 26, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: "#c7d2fe" }}>Leave home at {fmt(J.leave)}</div>
                 <div style={{ fontSize: 12, color: "#a78bfa", marginTop: 4 }}>For {tt.sessions[0].subj} at {arriveByStr} in {tt.sessions[0].room}</div>
@@ -1182,16 +1858,34 @@ export default function App() {
         )}
 
         {/* JOURNEY TIMELINE */}
-        {hasClass && inTerm && (
+        {((hasClass && inTerm) || isRubyRoute) && (
           <Card style={{ marginBottom: 14, animation: "slideIn .55s" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <Lbl icon={"\uD83D\uDCCD"}>{dir === "to" ? `Journey to College \u2014 ${tt.sessions[0].subj} at ${arriveByStr}` : `Journey Home \u2014 ${tt.sessions[tt.sessions.length - 1].subj} ends ${tt.end}`}</Lbl>
-              <a href={liveTrainsUrl} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 12, backgroundColor: "rgba(16,185,129,.1)", border: "1px solid rgba(16,185,129,.2)", textDecoration: "none", fontSize: 10, fontWeight: 700, color: "#6ee7b7" }}>
-                <Pulse /> View Live &rarr;
+              <Lbl icon={"\uD83D\uDCCD"}>{travelMode === "college_to_ruby" ? "Journey to Ruby's \u2014 College \u2192 Sandhurst" : travelMode === "ruby_to_home" ? "Journey Home \u2014 Ruby's \u2192 Home" : dir === "to" ? `Journey to College \u2014 ${tt.sessions[0].subj} at ${arriveByStr}` : `Journey Home \u2014 ${tt.sessions[tt.sessions.length - 1].subj} ends ${tt.end}`}</Lbl>
+              <a href={liveTrainsUrl} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 12, backgroundColor: isRubyRoute ? "rgba(236,72,153,.1)" : "rgba(16,185,129,.1)", border: `1px solid ${isRubyRoute ? "rgba(236,72,153,.2)" : "rgba(16,185,129,.2)"}`, textDecoration: "none", fontSize: 10, fontWeight: 700, color: isRubyRoute ? "#f472b6" : "#6ee7b7" }}>
+                <Pulse c={isRubyRoute ? "#ec4899" : "#22c55e"} /> View Live &rarr;
               </a>
             </div>
             <div className="journey-steps" style={{ display: "flex", alignItems: "center", gap: 0, flexWrap: "wrap", justifyContent: "center" }}>
-              {(dir === "to" ? [
+              {(travelMode === "college_to_ruby" ? [
+                { icon: "\uD83C\uDFEB", lbl: "College", time: hasClass ? tt.end : "\u2014", sub: "Finish" },
+                { icon: "\uD83D\uDEB2", lbl: `${bSS}m`, sub: `${BIKE_STN_SCHOOL.mi}mi`, tr: true },
+                { icon: "\uD83D\uDE89", lbl: SCHOOL_STATION, time: J.tStr, sub: SCHOOL_STATION_CODE },
+                { icon: "\uD83D\uDE82", lbl: `${J.trainMins}m`, sub: J.arrStnStr ? "Live" : "Est.", tr: true },
+                { icon: "\uD83D\uDE89", lbl: RUBY_STATION, time: J.arrStnStr || fmt(J.arrSnd), sub: RUBY_STATION_CODE },
+                { icon: "\uD83D\uDEB2", lbl: `${BIKE_STN_RUBY.mins}m`, sub: `${BIKE_STN_RUBY.mi}mi`, tr: true },
+                { icon: "\u2764\uFE0F", lbl: "Ruby's", time: fmt(J.arrRuby), sub: RUBY_POSTCODE },
+              ] : travelMode === "ruby_to_home" ? [
+                { icon: "\u2764\uFE0F", lbl: "Ruby's", time: fmt(J.leaveRuby), sub: RUBY_POSTCODE },
+                { icon: "\uD83D\uDEB2", lbl: `${BIKE_STN_RUBY.mins}m`, sub: `${BIKE_STN_RUBY.mi}mi`, tr: true },
+                { icon: "\uD83D\uDE89", lbl: RUBY_STATION, time: J.tStr, sub: RUBY_STATION_CODE },
+                { icon: "\uD83D\uDE82", lbl: `${J.trainMins}m`, sub: J.arrStnStr ? "Live" : "Est.", tr: true },
+                { icon: "\uD83D\uDE89", lbl: "Guildford", time: J.arrStnStr || fmt(J.arrGld), sub: "GLD" },
+                { icon: "\uD83D\uDD04", lbl: `${GLD_CONNECTION_MINS}m`, sub: "Change", tr: true },
+                { icon: "\uD83D\uDE89", lbl: "GOD/FNC", sub: "Home stn" },
+                { icon: "\uD83D\uDEB2", lbl: `bike`, sub: "home", tr: true },
+                { icon: "\uD83C\uDFE0", lbl: "Home", time: fmt(J.arrHome), sub: HOME_POSTCODE },
+              ] : dir === "to" ? [
                 { icon: "\uD83C\uDFE0", lbl: "Home", time: fmt(J.leave), sub: HOME_POSTCODE },
                 { icon: "\uD83D\uDEB2", lbl: `${bHS}m`, sub: `${activeStn.bikeMi}mi`, tr: true },
                 { icon: "\uD83D\uDE89", lbl: activeStn.name, time: J.tStr, sub: activeStn.code },
@@ -1222,7 +1916,14 @@ export default function App() {
                 </div>
               ))}
             </div>
-            {bikeAdj > 0 && <div style={{ marginTop: 8, padding: "5px 10px", borderRadius: 8, backgroundColor: "rgba(245,158,11,.1)", border: "1px solid rgba(245,158,11,.2)", fontSize: 11, color: "#fcd34d" }}>{"\u26A0\uFE0F"} Bike +{bikeAdj}min ({pRain ? "rain" : "wind"})</div>}
+            {bikeAdj > 0 && !bHSLearned && !bSSLearned && <div style={{ marginTop: 8, padding: "5px 10px", borderRadius: 8, backgroundColor: "rgba(245,158,11,.1)", border: "1px solid rgba(245,158,11,.2)", fontSize: 11, color: "#fcd34d" }}>{"\u26A0\uFE0F"} Bike +{bikeAdj}min ({pRain ? "rain" : "wind"})</div>}
+            {(bHSLearned || bSSLearned || bSHLearned) && (
+              <div style={{ marginTop: 8, padding: "5px 10px", borderRadius: 8, backgroundColor: "rgba(16,185,129,.08)", border: "1px solid rgba(16,185,129,.2)", fontSize: 11, color: "#6ee7b7" }}>
+                {"\uD83D\uDCCA"} Based on your {rides.length} recorded ride{rides.length !== 1 ? "s" : ""}
+                {pRain && rideModel[bHSSegKey]?.wetAvgSecs ? " (wet weather avg)" : ""}
+              </div>
+            )}
+            {busAlerts.length > 0 && <div style={{ marginTop: 8, padding: "5px 10px", borderRadius: 8, backgroundColor: "rgba(245,158,11,.12)", border: "1px solid rgba(245,158,11,.3)", fontSize: 11, color: "#fcd34d" }}>{"\uD83D\uDE8C"} Rail replacement buses running — bikes not allowed on bus services</div>}
 
             {/* 3-TRAIN PICKER */}
             {allTrains.length > 0 && (
@@ -1242,7 +1943,7 @@ export default function App() {
                         {isActive && <div style={{ fontSize: 8, fontWeight: 700, color: "#818cf8", marginBottom: 2 }}>RECOMMENDED</div>}
                         <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 16, fontWeight: 700, color: isActive ? "#e2e8f0" : "#94a3b8" }}>{t.std}</div>
                         <div style={{ display: "flex", justifyContent: "center", gap: 4, marginTop: 2 }}>
-                          <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4, backgroundColor: t.stnKey === "GOD" ? "rgba(16,185,129,.15)" : "rgba(99,102,241,.15)", color: t.stnKey === "GOD" ? "#6ee7b7" : "#818cf8" }}>{t.stnKey}</span>
+                          <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4, backgroundColor: t.stnKey === "SND" ? "rgba(236,72,153,.15)" : t.stnKey === "GOD" ? "rgba(16,185,129,.15)" : "rgba(99,102,241,.15)", color: t.stnKey === "SND" ? "#f472b6" : t.stnKey === "GOD" ? "#6ee7b7" : "#818cf8" }}>{t.stnKey}</span>
                         </div>
                         {t.arrTime && <div style={{ fontSize: 10, color: "#818cf8", marginTop: 2 }}>arr {t.arrTime}</div>}
                         {t.etd === "Cancelled" && <div style={{ fontSize: 9, color: "#ef4444", fontWeight: 700 }}>CANCELLED</div>}
@@ -1256,19 +1957,21 @@ export default function App() {
         )}
 
         {/* BOOK TRAIN + LIVE TRAINS ROW */}
-        {hasClass && inTerm && (
+        {((hasClass && inTerm) || isRubyRoute) && (
           <div style={{ display: "flex", gap: 10, marginBottom: 14, animation: "slideIn .57s" }}>
             <a href={trainlineUrl} target="_blank" rel="noopener noreferrer" style={{
               flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
               padding: "12px 16px", borderRadius: 12, textDecoration: "none",
-              background: "linear-gradient(135deg,rgba(16,185,129,.12),rgba(99,102,241,.08))",
-              border: "1px solid rgba(16,185,129,.2)",
+              background: isRubyRoute ? "linear-gradient(135deg,rgba(236,72,153,.12),rgba(168,85,247,.08))" : "linear-gradient(135deg,rgba(16,185,129,.12),rgba(99,102,241,.08))",
+              border: `1px solid ${isRubyRoute ? "rgba(236,72,153,.2)" : "rgba(16,185,129,.2)"}`,
             }}>
               <span style={{ fontSize: 18 }}>{"\uD83C\uDFAB"}</span>
               <div>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#6ee7b7" }}>Book on Trainline</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: isRubyRoute ? "#f472b6" : "#6ee7b7" }}>Book on Trainline</div>
                 <div style={{ fontSize: 10, color: "#94a3b8" }}>
-                  {dir === "to" ? `${activeStn?.name || "Godalming"} \u2192 ${SCHOOL_STATION}` : `${SCHOOL_STATION} \u2192 ${activeStn?.name || "Godalming"}`} {"\u00B7"} 16-25 Railcard
+                  {travelMode === "college_to_ruby" ? `${SCHOOL_STATION} \u2192 ${RUBY_STATION}`
+                    : travelMode === "ruby_to_home" ? `${RUBY_STATION} \u2192 Godalming`
+                    : dir === "to" ? `${activeStn?.name || "Godalming"} \u2192 ${SCHOOL_STATION}` : `${SCHOOL_STATION} \u2192 ${activeStn?.name || "Godalming"}`} {"\u00B7"} 16-25 Railcard
                 </div>
               </div>
             </a>
@@ -1283,34 +1986,18 @@ export default function App() {
           </div>
         )}
 
-        {/* ARRIVED SAFELY */}
-        {isToday && hasClass && inTerm && (locLabel === "At college" || locLabel === "Near college") && (
-          <div style={{ marginBottom: 14, animation: "slideIn .58s" }}>
-            <button onClick={sendArrivedSafely} style={{
-              width: "100%", padding: "16px 20px", borderRadius: 14, border: "2px solid rgba(16,185,129,.4)",
-              background: "linear-gradient(135deg,rgba(16,185,129,.15),rgba(6,78,59,.2))",
-              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-              transition: "all .2s",
-            }}>
-              <span style={{ fontSize: 28 }}>{showSafetyConfirm ? "\u2705" : "\uD83D\uDFE2"}</span>
-              <div style={{ textAlign: "left" }}>
-                <div style={{ fontSize: 16, fontWeight: 800, color: showSafetyConfirm ? "#6ee7b7" : "#e2e8f0" }}>
-                  {showSafetyConfirm ? "Sent! Stay safe today" : "I've Arrived Safely"}
-                </div>
-                <div style={{ fontSize: 11, color: "#6ee7b7" }}>
-                  {showSafetyConfirm ? `Notified ${SAFETY_CONTACT_NAME}` : `Tap to notify ${SAFETY_CONTACT_NAME} via SMS`}
-                </div>
-              </div>
-            </button>
-          </div>
-        )}
-
         {/* WEEKEND AT RUBY'S */}
-        {isWeekendRuby && inTerm && (
+        {(isWeekendRuby || isWeekendRubyNow) && inTerm && (
           <Card style={{ marginBottom: 14, animation: "slideIn .58s" }} glow="rgba(236,72,153,.1)">
             <Lbl icon={"\u2764\uFE0F"}>Weekend at Ruby's — {RUBY_STATION}</Lbl>
 
-            {isFriday && hasClass && (
+            {isRubyRoute && (
+              <div style={{ textAlign: "center", padding: "8px 10px", fontSize: 12, color: "#f472b6", fontWeight: 600 }}>
+                {"\u2B06\uFE0F"} See journey timeline above for full route details
+              </div>
+            )}
+
+            {isFridayNow && hasClass && !isRubyRoute && (
               <div>
                 <div style={{ fontSize: 10, fontWeight: 700, color: "#f472b6", letterSpacing: 1, marginBottom: 6 }}>FRIDAY → ONWARD TO RUBY'S</div>
                 <div style={{ padding: "10px 14px", borderRadius: 10, backgroundColor: "rgba(236,72,153,.06)", border: "1px solid rgba(236,72,153,.15)" }}>
@@ -1319,7 +2006,7 @@ export default function App() {
                     {earlyFinishGym && <> → {"\uD83C\uDFCB\uFE0F"} <span style={{ color: "#fcd34d" }}>Gym until {earlyFinishGym.doneBy}</span></>}
                     {" → "}{"\uD83D\uDEB2"} Bike {bSS}min to Woking station
                     {" → "}{"\uD83D\uDE82"} {rubyToTrain ? <><strong style={{ color: "#f472b6" }}>{rubyToTrain.std}</strong> train to {RUBY_STATION}{rubyToTrain.arrTime && <> (arr <strong style={{ color: "#e2e8f0" }}>{rubyToTrain.arrTime}</strong>)</>}</> : <span style={{ color: "#94a3b8" }}>train to {RUBY_STATION} (~35min)</span>}
-                    {" → "}{"\uD83D\uDEB2"} Bike {BIKE_STN_RUBY.mins}min to Green Lane
+                    {" → "}{"\uD83D\uDEB2"} Bike {BIKE_STN_RUBY.mins}min to {RUBY_NAME}'s
                   </div>
                   {rubyToTrain && (
                     <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
@@ -1343,7 +2030,7 @@ export default function App() {
               </div>
             )}
 
-            {isSaturday && (
+            {isSaturdayNow && (
               <div style={{ textAlign: "center", padding: "14px 10px" }}>
                 <div style={{ fontSize: 28, marginBottom: 6 }}>{"\uD83D\uDE0D"}</div>
                 <div style={{ fontSize: 14, fontWeight: 700, color: "#f472b6" }}>Enjoying the weekend at Ruby's</div>
@@ -1352,7 +2039,7 @@ export default function App() {
               </div>
             )}
 
-            {isSunday && (
+            {(isSunday || isSundayNow) && !isRubyRoute && (
               <div>
                 <div style={{ fontSize: 10, fontWeight: 700, color: "#f472b6", letterSpacing: 1, marginBottom: 6 }}>SUNDAY → HEADING HOME</div>
                 <div style={{ padding: "10px 14px", borderRadius: 10, backgroundColor: "rgba(236,72,153,.06)", border: "1px solid rgba(236,72,153,.15)" }}>
@@ -1715,7 +2402,7 @@ export default function App() {
         <Card style={{ marginTop: 14, animation: "slideIn .8s" }} glow={sts === "danger" ? "rgba(239,68,68,.12)" : undefined}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <Lbl icon={dir === "to" ? "\uD83C\uDFEB" : "\uD83C\uDFE0"}>{dir === "to" ? "Trains to Woking" : "Trains from Woking"}</Lbl>
+              <Lbl icon={isRubyRoute ? "\u2764\uFE0F" : dir === "to" ? "\uD83C\uDFEB" : "\uD83C\uDFE0"}>{travelMode === "college_to_ruby" ? "Trains Woking \u2192 Sandhurst" : travelMode === "ruby_to_home" ? "Trains Sandhurst \u2192 Guildford" : dir === "to" ? "Trains to Woking" : "Trains from Woking"}</Lbl>
               <Badge s={sts}>{sts === "good" ? "Live" : sts === "warning" ? "Delays" : "Disrupted"}</Badge>
             </div>
             <div style={{ fontSize: 10, color: "#64748b" }}>{lastRef ? fmt(lastRef) : ""} {"\u00B7"} 60s</div>
@@ -1726,6 +2413,27 @@ export default function App() {
               ? <>Today's live departures as a timetable guide for {tt.label}. Click to plan your {dir === "to" ? "morning" : "return"} train</>
               : <>Click a train {"\u2014"} journey recalculates with bike time both sides</>}
           </div>
+
+          {busAlerts.length > 0 && (
+            <div style={{ marginBottom: 10, padding: "12px 14px", borderRadius: 12, background: "linear-gradient(135deg, rgba(245,158,11,.15), rgba(239,68,68,.1))", border: "2px solid rgba(245,158,11,.4)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <span style={{ fontSize: 18 }}>{"\uD83D\uDE8C"}</span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: "#fcd34d", letterSpacing: 1 }}>RAIL REPLACEMENT BUSES</span>
+                <span style={{ fontSize: 14 }}>{"\uD83D\uDEB2\u274C"}</span>
+              </div>
+              {busAlerts.map((b, i) => (
+                <div key={i} style={{ fontSize: 11, color: "#fcd34d", marginBottom: 3 }}>
+                  {"\u26A0\uFE0F"} {b.from} {"\u2192"} {b.to}: <strong>{b.count} bus replacement{b.count > 1 ? "s" : ""}</strong>
+                </div>
+              ))}
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#fca5a5", marginTop: 8 }}>
+                {"\u274C"} Bikes are NOT allowed on rail replacement buses
+              </div>
+              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>
+                Consider cycling the full route or check alternative services
+              </div>
+            </div>
+          )}
 
           {alerts.length > 0 && <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 10, backgroundColor: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)" }}>{alerts.map((a, i) => <div key={i} style={{ fontSize: 11, color: "#fca5a5" }}>{typeof a === "string" ? a.replace(/<[^>]*>/g, "") : ""}</div>)}</div>}
 
@@ -1749,7 +2457,7 @@ export default function App() {
               const arr = t.arrTime || "\u2014";
               return (
                 <div key={trainKey(t)} className="ts train-row" onClick={() => setSelTrain(trainKey(t) === selTrain ? null : trainKey(t))} style={{ display: "grid", gridTemplateColumns: "40px 55px 55px 60px 36px 1fr 80px", alignItems: "center", gap: 6, padding: "8px 12px", backgroundColor: act ? "rgba(99,102,241,.12)" : "transparent", border: act ? "1px solid rgba(99,102,241,.3)" : "1px solid transparent" }}>
-                  <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 4px", borderRadius: 4, textAlign: "center", backgroundColor: t.stnKey === "GOD" ? "rgba(16,185,129,.15)" : "rgba(99,102,241,.15)", color: t.stnKey === "GOD" ? "#6ee7b7" : "#818cf8" }}>{t.stnKey}</span>
+                  <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 4px", borderRadius: 4, textAlign: "center", backgroundColor: t.stnKey === "SND" ? "rgba(236,72,153,.15)" : t.stnKey === "GOD" ? "rgba(16,185,129,.15)" : "rgba(99,102,241,.15)", color: t.stnKey === "SND" ? "#f472b6" : t.stnKey === "GOD" ? "#6ee7b7" : "#818cf8" }}>{t.stnKey}</span>
                   <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 15, fontWeight: 700, color: "#e2e8f0" }}>{sc}</span>
                   <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 13, fontWeight: 600, color: "#818cf8" }}>{arr}</span>
                   <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, fontWeight: 600, color: cnc ? "#ef4444" : dly ? "#f59e0b" : "#22c55e" }}>{cnc ? "CANC" : dly ? es : "On time"}</span>
@@ -1761,9 +2469,13 @@ export default function App() {
             })}
 
           {activeTrain && (
-            <div style={{ marginTop: 10, padding: "10px 14px", borderRadius: 10, background: "linear-gradient(135deg,rgba(99,102,241,.1),rgba(16,185,129,.06))", border: "1px solid rgba(99,102,241,.2)" }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#818cf8" }}>
-                {dir === "to" ? (
+            <div style={{ marginTop: 10, padding: "10px 14px", borderRadius: 10, background: isRubyRoute ? "linear-gradient(135deg,rgba(236,72,153,.1),rgba(168,85,247,.06))" : "linear-gradient(135deg,rgba(99,102,241,.1),rgba(16,185,129,.06))", border: `1px solid ${isRubyRoute ? "rgba(236,72,153,.2)" : "rgba(99,102,241,.2)"}` }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: isRubyRoute ? "#f472b6" : "#818cf8" }}>
+                {travelMode === "college_to_ruby" ? (
+                  <>{"\uD83D\uDE82"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#f472b6" }}>{activeTrain.std}</span> {SCHOOL_STATION_CODE} {"\u2192"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#e2e8f0" }}>{J.arrStnStr || fmt(J.arrSnd)}</span> SND ({J.trainMins}m) {"\u2192"} Leave college <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#f472b6" }}>{fmt(J.leaveCollege)}</span> {"\u2192"} {"\uD83D\uDEB2"}{bSS}m {"\u2192"} train {"\u2192"} {"\uD83D\uDEB2"}{BIKE_STN_RUBY.mins}m {"\u2192"} <span style={{ color: "#f472b6" }}>{"\u2764\uFE0F"} Ruby's {fmt(J.arrRuby)}</span></>
+                ) : travelMode === "ruby_to_home" ? (
+                  <>{"\uD83D\uDE82"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#f472b6" }}>{activeTrain.std}</span> SND {"\u2192"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#e2e8f0" }}>{J.arrStnStr || fmt(J.arrGld)}</span> GLD ({J.trainMins}m) {"\u2192"} Leave Ruby's <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#f472b6" }}>{fmt(J.leaveRuby)}</span> {"\u2192"} {"\uD83D\uDEB2"}{BIKE_STN_RUBY.mins}m {"\u2192"} train {"\u2192"} change GLD {"\u2192"} <span style={{ color: "#6ee7b7" }}>{"\uD83C\uDFE0"} Home ~{fmt(J.arrHome)}</span></>
+                ) : dir === "to" ? (
                   <>{"\uD83D\uDE82"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{activeTrain.std}</span> {activeStn.code} {"\u2192"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#818cf8" }}>{J.arrStnStr || fmt(J.arrStn)}</span> {SCHOOL_STATION_CODE} ({J.trainMins}m) {"\u2192"} Leave home <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{fmt(J.leave)}</span> {"\u2192"} {"\uD83D\uDEB2"}{bHS}m {"\u2192"} train {"\u2192"} {"\uD83D\uDEB2"}{bSS}m {"\u2192"} {J.late ? <span style={{ color: "#fca5a5" }}>{"\u26A0\uFE0F"} LATE {fmt(J.arrSchool)}</span> : <span style={{ color: "#6ee7b7" }}>{"\u2705"} {fmt(J.arrSchool)} ({J.spare}m spare)</span>}</>
                 ) : (
                   <>{"\uD83D\uDE82"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{activeTrain.std}</span> {SCHOOL_STATION_CODE} {"\u2192"} <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#818cf8" }}>{J.arrStnStr || fmt(J.arrStn)}</span> {activeStn.code} ({J.trainMins}m) {"\u2192"} Leave college <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#6ee7b7" }}>{fmt(J.leaveSchool)}</span> {"\u2192"} {"\uD83D\uDEB2"}{bSS}m {"\u2192"} train {"\u2192"} {"\uD83D\uDEB2"}{bSH}m {"\u2192"} <span style={{ color: "#6ee7b7" }}>{"\uD83C\uDFE0"} {fmt(J.arrHome)}</span></>
@@ -1843,6 +2555,88 @@ export default function App() {
             </div>
             <div style={{ fontSize: 10, color: "#64748b", textAlign: "center" }}>
               {thisMonthCommutes.length} commutes this month · {commuteLog.length} total tracked
+            </div>
+
+            {/* Ride Tracking Section */}
+            {rides.length > 0 && (
+              <>
+                <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(148,163,184,.08)" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 2, color: "#818cf8", marginBottom: 10, textTransform: "uppercase" }}>{"\uD83D\uDEB2"} Ride Tracking</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    {Object.entries(RIDE_SEGMENTS).filter(([key]) => rides.some(r => r.segment === key)).map(([key, seg]) => {
+                      const segRides = rides.filter(r => r.segment === key);
+                      const avgSecs = Math.round(segRides.reduce((a, r) => a + r.durationSecs, 0) / segRides.length);
+                      const pb = pbs[key];
+                      const recent = segRides.slice(-5);
+                      const improving = recent.length >= 3 && recent[recent.length - 1].durationSecs < recent[0].durationSecs;
+                      return (
+                        <div key={key} style={{ padding: "10px 12px", borderRadius: 10, backgroundColor: "rgba(99,102,241,.05)", border: "1px solid rgba(99,102,241,.1)" }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: "#c7d2fe", marginBottom: 4 }}>{seg.label}</div>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                            <div>
+                              <div style={{ fontSize: 9, color: "#64748b" }}>AVG</div>
+                              <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace", color: "#e2e8f0" }}>{Math.floor(avgSecs / 60)}:{String(avgSecs % 60).padStart(2, "0")}</div>
+                            </div>
+                            {pb && (
+                              <div style={{ textAlign: "right" }}>
+                                <div style={{ fontSize: 9, color: "#f59e0b" }}>{"\uD83C\uDFC6"} PB</div>
+                                <div style={{ fontSize: 14, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace", color: "#fcd34d" }}>{Math.floor(pb.bestSecs / 60)}:{String(pb.bestSecs % 60).padStart(2, "0")}</div>
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                            <span style={{ fontSize: 9, color: "#94a3b8" }}>{segRides.length} ride{segRides.length !== 1 ? "s" : ""}</span>
+                            {improving && <span style={{ fontSize: 9, fontWeight: 700, color: "#6ee7b7" }}>{"\u2B06\uFE0F"} Improving!</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#64748b", textAlign: "center", marginTop: 8 }}>
+                    {rides.length} total ride{rides.length !== 1 ? "s" : ""} tracked
+                  </div>
+                </div>
+              </>
+            )}
+          </Card>
+        )}
+
+        {/* Ride Tracking (shown even without commute log) */}
+        {rides.length > 0 && commuteLog.length === 0 && (
+          <Card style={{ marginTop: 14, animation: "slideIn .88s" }} glow="rgba(16,185,129,.06)">
+            <Lbl icon={"\uD83D\uDEB2"}>Ride Tracking</Lbl>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {Object.entries(RIDE_SEGMENTS).filter(([key]) => rides.some(r => r.segment === key)).map(([key, seg]) => {
+                const segRides = rides.filter(r => r.segment === key);
+                const avgSecs = Math.round(segRides.reduce((a, r) => a + r.durationSecs, 0) / segRides.length);
+                const pb = pbs[key];
+                const recent = segRides.slice(-5);
+                const improving = recent.length >= 3 && recent[recent.length - 1].durationSecs < recent[0].durationSecs;
+                return (
+                  <div key={key} style={{ padding: "10px 12px", borderRadius: 10, backgroundColor: "rgba(99,102,241,.05)", border: "1px solid rgba(99,102,241,.1)" }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#c7d2fe", marginBottom: 4 }}>{seg.label}</div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                      <div>
+                        <div style={{ fontSize: 9, color: "#64748b" }}>AVG</div>
+                        <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace", color: "#e2e8f0" }}>{Math.floor(avgSecs / 60)}:{String(avgSecs % 60).padStart(2, "0")}</div>
+                      </div>
+                      {pb && (
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontSize: 9, color: "#f59e0b" }}>{"\uD83C\uDFC6"} PB</div>
+                          <div style={{ fontSize: 14, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace", color: "#fcd34d" }}>{Math.floor(pb.bestSecs / 60)}:{String(pb.bestSecs % 60).padStart(2, "0")}</div>
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                      <span style={{ fontSize: 9, color: "#94a3b8" }}>{segRides.length} ride{segRides.length !== 1 ? "s" : ""}</span>
+                      {improving && <span style={{ fontSize: 9, fontWeight: 700, color: "#6ee7b7" }}>{"\u2B06\uFE0F"} Improving!</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 10, color: "#64748b", textAlign: "center", marginTop: 8 }}>
+              {rides.length} total ride{rides.length !== 1 ? "s" : ""} tracked
             </div>
           </Card>
         )}
