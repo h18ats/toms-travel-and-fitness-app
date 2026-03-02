@@ -10,11 +10,7 @@
  *   token - auth token from /api/auth
  */
 
-import { createHmac } from "node:crypto";
-
-function hashToken(password) {
-  return createHmac("sha256", "ttc-salt").update(password).digest("hex");
-}
+import { hashToken } from "./_token.js";
 
 export default async function handler(req, res) {
   const origin = req.headers.origin;
