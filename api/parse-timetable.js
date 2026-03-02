@@ -241,6 +241,6 @@ export default async function handler(req, res) {
     return res.status(200).json(parsed);
   } catch (err) {
     console.error("Unexpected error:", err);
-    return res.status(500).json({ error: "Internal server error.", detail: err.message });
+    return res.status(500).json({ error: "Internal server error." });
   }
 };
