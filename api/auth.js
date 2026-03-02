@@ -11,7 +11,11 @@ function hashToken(password) {
 }
 
 export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  const origin = req.headers.origin;
+  if (origin && (origin === "https://toms-travel-companion.vercel.app" || /^http:\/\/localhost(:\d+)?$/.test(origin))) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
   res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return res.status(204).end();
@@ -19,7 +23,7 @@ export default async function handler(req, res) {
   if (req.method === "POST") {
     const appPassword = process.env.APP_PASSWORD;
     if (!appPassword) {
-      return res.status(500).json({ error: "APP_PASSWORD not configured" });
+      return res.status(500).json({ error: "Internal server error" });
     }
 
     const { password } = req.body || {};
@@ -38,7 +42,7 @@ export default async function handler(req, res) {
   if (req.method === "GET") {
     const appPassword = process.env.APP_PASSWORD;
     if (!appPassword) {
-      return res.status(500).json({ error: "APP_PASSWORD not configured" });
+      return res.status(500).json({ error: "Internal server error" });
     }
     const { token } = req.query;
     const expected = hashToken(appPassword);

@@ -1527,6 +1527,7 @@ function AppContent() {
         const text = await file.text();
         body = { type: 'text', content: text };
       }
+      body.token = authToken();
       const resp = await fetch('/api/parse-timetable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!resp.ok) throw new Error('Parse failed');
       const data = await resp.json();
@@ -1557,6 +1558,7 @@ function AppContent() {
         const text = await file.text();
         body = { type: 'exam_text', content: text };
       }
+      body.token = authToken();
       const resp = await fetch('/api/parse-timetable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!resp.ok) throw new Error('Parse failed');
       const data = await resp.json();

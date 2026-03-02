@@ -17,7 +17,11 @@ function hashToken(password) {
 }
 
 export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  const origin = req.headers.origin;
+  if (origin && (origin === "https://toms-travel-companion.vercel.app" || /^http:\/\/localhost(:\d+)?$/.test(origin))) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return res.status(204).end();
@@ -26,13 +30,14 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed. Use GET." });
   }
 
-  // Verify auth token
+  // Verify auth token (fail-closed: reject if APP_PASSWORD not configured)
   const appPassword = process.env.APP_PASSWORD;
-  if (appPassword) {
-    const { token } = req.query;
-    if (!token || token !== hashToken(appPassword)) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
+  if (!appPassword) {
+    return res.status(500).json({ error: "Internal server error" });
+  }
+  const { token } = req.query;
+  if (!token || token !== hashToken(appPassword)) {
+    return res.status(401).json({ error: "Unauthorized" });
   }
 
   const { from, to, count = "15" } = req.query;

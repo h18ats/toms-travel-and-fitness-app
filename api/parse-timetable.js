@@ -12,9 +12,15 @@
  * Returns structured JSON parsed by Claude claude-sonnet-4-6.
  */
 
+import { createHmac } from "node:crypto";
+
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 const MODEL = "claude-sonnet-4-6";
+
+function hashToken(password) {
+  return createHmac("sha256", "ttc-salt").update(password).digest("hex");
+}
 
 // ── Prompts ──────────────────────────────────────────────────────────────────
 
@@ -151,8 +157,12 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed. Use POST." });
   }
 
-  // CORS headers (useful when called from a browser)
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  // CORS
+  const origin = req.headers.origin;
+  if (origin && (origin === "https://toms-travel-companion.vercel.app" || /^http:\/\/localhost(:\d+)?$/.test(origin))) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
@@ -160,9 +170,19 @@ export default async function handler(req, res) {
     return res.status(204).end();
   }
 
+  // Auth check (fail-closed)
+  const appPassword = process.env.APP_PASSWORD;
+  if (!appPassword) {
+    return res.status(500).json({ error: "Internal server error" });
+  }
+  const authToken = req.query?.token || req.body?.token;
+  if (!authToken || authToken !== hashToken(appPassword)) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: "Server misconfiguration: ANTHROPIC_API_KEY is not set." });
+    return res.status(500).json({ error: "Internal server error" });
   }
 
   // Validate body
@@ -204,9 +224,7 @@ export default async function handler(req, res) {
       const errorText = await response.text();
       console.error(`Anthropic API error (${response.status}):`, errorText);
       return res.status(502).json({
-        error: "Anthropic API request failed.",
-        status: response.status,
-        detail: errorText,
+        error: "AI request failed",
       });
     }
 
@@ -215,7 +233,7 @@ export default async function handler(req, res) {
     // Extract the text content from Claude's response
     const textBlock = data.content && data.content.find((b) => b.type === "text");
     if (!textBlock || !textBlock.text) {
-      return res.status(502).json({ error: "No text content in Anthropic response.", raw: data });
+      return res.status(502).json({ error: "No text content in AI response" });
     }
 
     const rawText = textBlock.text.trim();
@@ -233,14 +251,13 @@ export default async function handler(req, res) {
       parsed = JSON.parse(jsonString);
     } catch (parseErr) {
       return res.status(502).json({
-        error: "Failed to parse Claude response as JSON.",
-        rawText: rawText,
+        error: "Failed to parse AI response",
       });
     }
 
     return res.status(200).json(parsed);
   } catch (err) {
     console.error("Unexpected error:", err);
-    return res.status(500).json({ error: "Internal server error." });
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
